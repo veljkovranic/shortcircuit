@@ -1,0 +1,599 @@
+// Constants
+
+COMMENT_SPAN_OPENING_OPERATOR = {
+    "/*"
+}
+
+COMMENT_SPAN_CLOSING_OPERATOR = {
+    "*/"
+}
+
+COMMENT_SPAN_CONTENT = {
+    (
+        !("*/") ~ ANY
+    )*
+}
+
+COMMENT_LINE_CONTENT = {
+    (
+        !("\n") ~ ANY
+    )*
+}
+
+COMMENT_SPAN = { COMMENT_SPAN_OPENING_OPERATOR ~ COMMENT_SPAN_CONTENT ~ COMMENT_SPAN_CLOSING_OPERATOR}
+COMMENT_LINE = {"//" ~ COMMENT_LINE_CONTENT ~ NEWLINE}
+
+COMMENT = { COMMENT_SPAN | COMMENT_LINE}
+
+WHITESPACE = _{WHITE_SPACE}
+
+END_OF_LINE = {
+    ";"
+}
+
+STRING_DELIMITER = _{
+    "\""
+}
+
+// Commons
+
+VariableName = {
+    ASCII_ALPHA ~ ASCII_ALPHANUMERIC*
+}
+
+FilesystemPath = {
+    (!"\"" ~ ANY)+
+}
+
+Parameters = {
+    "(" ~
+    (
+        VariableName ~
+        (
+            "," ~ VariableName
+        )*
+    )?
+    ~ ")"
+}
+
+// Expression
+//
+// - Expression are statements composed of a variable number of constant, variable values and function calls, separated by operators
+// - Operators have precendence
+//
+
+E_Decimal = ${
+    ASCII_DIGIT+
+}
+
+E_SemVer = ${
+    E_Decimal ~ "." ~ E_Decimal ~ "." ~ E_Decimal ~ ";"
+}
+
+E_Hexadecimal = ${
+    "0x" ~ ASCII_HEX_DIGIT+
+}
+
+E_VariableName = ${
+  (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+E_TerminalValue = _{
+    E_Hexadecimal | E_Decimal | E_VariableName
+}
+
+E_ArrayOperatorOpen = {
+    "["
+}
+
+E_ArrayOperatorClose = {
+    "]"
+}
+
+E_Array = {
+    E_ArrayOperatorOpen ~ Expression? ~ E_ArrayOperatorClose
+}
+
+E_BracketsOperatorOpen = {
+    "("
+}
+
+E_BracketsOperatorclose = {
+    ")"
+}
+
+E_Brackets = {
+    E_BracketsOperatorOpen ~ Expression? ~ E_BracketsOperatorclose
+}
+
+E_Value = {
+    E_TerminalValue | E_Brackets | E_Array
+}
+
+Expression = !{
+    E_0_CommaOp
+}
+
+E_0_CommaOperator = {
+    (",")
+}
+
+E_0_CommaOp = _{
+    E_1_SignalAssertionConstraintOp ~ (E_0_CommaOperator ~ E_1_SignalAssertionConstraintOp)*
+}
+
+E_1_SignalAssertionConstraintOperator = {
+    ("===")
+}
+
+E_1_SignalAssertionConstraintOp = _{
+    E_2_SignalLeftHandOp ~ (E_1_SignalAssertionConstraintOperator ~ E_2_SignalLeftHandOp)*
+}
+
+E_2_SignalLeftHandOperator = {
+    ("<==" | "<--")
+}
+
+E_2_SignalLeftHandOp = _{
+    (E_3_SignalRightHandOp ~ E_2_SignalLeftHandOperator)? ~ E_3_SignalRightHandOp
+}
+
+E_3_SignalRightHandOperator = {
+    ("==>" | "-->")
+}
+
+E_3_SignalRightHandOp = _{
+    E_4_AssignmentOp ~ (E_3_SignalRightHandOperator ~ E_4_AssignmentOp)*
+}
+
+E_4_AssignmentOperator = {
+    (("=" ~ !"=") | "+=" | "-=" | "*=" | "/=" | "%=" | "<<=" | ">>=" | "&=" | "^=" | "|=")
+}
+
+E_4_AssignmentOp = _{
+    (E_5_TernaryOp ~ E_4_AssignmentOperator)? ~ E_5_TernaryOp
+}
+
+E_5_TernaryFirstOperator = {
+    "?"
+}
+
+E_5_TernarySecondOperator = {
+    ":"
+}
+
+E_5_TernaryOp = _{
+    E_6_LogicalOrOp ~ (E_5_TernaryFirstOperator ~ E_6_LogicalOrOp ~ E_5_TernarySecondOperator ~ E_6_LogicalOrOp)?
+}
+
+E_6_LogicalOrOperator = {
+    ("||")
+}
+
+E_6_LogicalOrOp = _{
+    E_7_LogicalAndOp ~ (E_6_LogicalOrOperator ~ E_7_LogicalAndOp)*
+}
+
+E_7_LogicalAndOperator = {
+    ("&&")
+}
+
+E_7_LogicalAndOp = _{
+    E_8_BitwiseOrOp ~ (E_7_LogicalAndOperator ~ E_8_BitwiseOrOp)*
+}
+
+E_8_BitwiseOrOperator = {
+    ("|")
+}
+
+E_8_BitwiseOrOp = _{
+   E_9_BitwiseXorOp ~ (E_8_BitwiseOrOperator ~ E_9_BitwiseXorOp)*
+}
+
+E_9_BitwiseXorOperator = {
+    ("^")
+}
+
+E_9_BitwiseXorOp = _{
+   E_10_BitwiseAndOp ~ (E_9_BitwiseXorOperator ~ E_10_BitwiseAndOp)*
+}
+
+E_10_BitwiseAndOperator = {
+    ("&")
+}
+
+E_10_BitwiseAndOp = _{
+   E_11_RelationalEqualityOp ~ (E_10_BitwiseAndOperator ~ E_11_RelationalEqualityOp)*
+}
+
+E_11_RelationalEqualityOperator = {
+    (("==" ~ !"=") | "!=")
+}
+
+E_11_RelationalEqualityOp = _{
+    E_12_RelationalOrderingOp ~ (E_11_RelationalEqualityOperator ~ E_12_RelationalOrderingOp)*
+}
+
+E_12_RelationalOrderingOperator = {
+    (">=" | ">" | ("<=" ~ !"=") | ("<" ~ !("=" | "-") ) )
+}
+
+E_12_RelationalOrderingOp = _{
+    E_13_BitwiseShiftOp ~ (E_12_RelationalOrderingOperator ~ E_13_BitwiseShiftOp)*
+}
+
+E_13_BitwiseShiftOperator = {
+    (">>" | "<<")
+}
+
+E_13_BitwiseShiftOp = _{
+    E_14_SumOp ~ (E_13_BitwiseShiftOperator ~ E_14_SumOp)*
+}
+
+E_14_SumOperator = {
+    ("+" | "-")
+}
+
+E_14_SumOp = _{
+    E_15_ProductOp ~ (E_14_SumOperator ~ E_15_ProductOp)*
+}
+
+E_15_ProductOperator = {
+    ("*" | "/" | "%" | "\\")
+}
+
+E_15_ProductOp = _{
+    E_16_ExponentialOp ~ (E_15_ProductOperator ~ E_16_ExponentialOp)*
+}
+
+E_16_ExponentialOperator = {
+    ("**")
+}
+
+E_16_ExponentialOp = _{
+    E_17_PrefixOp ~ (E_16_ExponentialOperator ~ E_17_PrefixOp)*
+}
+
+E_17_PrefixOperator = {
+    ("!" | "~" | "++" | ("--" ~ !">") | "+" | ("-" ~ !"-"))
+}
+
+E_17_PrefixOp = _{
+    E_17_PrefixOperator* ~ E_18_PostfixOp
+}
+
+E_18_PostfixOperator = {
+    ("++" | ("--" ~ !">"))
+}
+
+E_18_PostfixOp = _{
+    E_19_MemberAccessOp ~ E_18_PostfixOperator*
+}
+
+E_19_MemberAccessOperator = {
+    "."
+}
+
+E_19_MemberAccessOp = _{
+    E_20_BracedOp ~ (E_19_MemberAccessOperator ~ E_20_BracedOp)*
+}
+
+E_20_ArgumentsContent = {
+    (
+        Expression
+    )
+    ~
+    (
+        "," ~ Expression
+    )*
+}
+
+E_20_BracedOperatorOpen = {
+   "[" | "("
+}
+
+E_20_BracedOperatorClose = {
+   "]" | ")"
+}
+
+E_20_BracedOp = _{
+    E_Value ~ (E_20_BracedOperatorOpen ~ E_20_ArgumentsContent? ~ E_20_BracedOperatorClose)*
+}
+
+// Declaration Statements
+//
+// - Declare a new variable available in the current scope
+//
+
+VariableDeclarationKW = ${
+    "var" ~ WHITESPACE+
+}
+
+SignalDeclarationMainKW = ${
+    "signal" ~ WHITESPACE+
+}
+
+SignalDeclarationVisibilityKW = ${
+    ("private" ~ WHITESPACE+)?
+}
+
+SignalDeclarationConnectionKW = ${
+      (("input" | "output") ~ WHITESPACE+)?
+}
+
+SignalDeclarationKW = {
+    SignalDeclarationMainKW ~ SignalDeclarationVisibilityKW ~ SignalDeclarationConnectionKW
+}
+
+ComponentDeclarationKW = ${
+    "component" ~ WHITESPACE+
+}
+
+ArrayDeclarationOperatorOpen = {
+    "["
+}
+
+ArrayDeclarationOperatorClose = {
+    "]"
+}
+
+ArrayDeclaration = {
+    ArrayDeclarationOperatorOpen ~ Expression ~ ArrayDeclarationOperatorClose
+}
+
+TypedComponentConstructorOperatorOpen = {
+    "("
+}
+
+TypedComponentConstructorOperatorClose = {
+    ")"
+}
+
+TypedComponentDeclaration = {
+    ComponentDeclarationKW ~ E_VariableName ~ (TypedComponentConstructorOperatorOpen ~ E_20_ArgumentsContent? ~ TypedComponentConstructorOperatorClose) ~ E_VariableName ~ ArrayDeclaration*
+}
+
+DeclarationStatement = {
+    TypedComponentDeclaration | ((SignalDeclarationKW | VariableDeclarationKW | ComponentDeclarationKW) ~ E_VariableName ~ ArrayDeclaration* ~ ("=" ~ Expression)?)
+}
+
+// Control Statements
+//
+// - Evaluate expressions to decide what to compute or not
+//
+
+WhileKW = ${
+    "while"
+}
+
+WhileStatement = {
+    WhileKW ~ "(" ~ Expression ~ ")" ~ (Body | OneLineBody)
+}
+
+ForKW = ${
+    "for"
+}
+
+ForStatement = {
+    ForKW ~ "(" ~ (DeclarationStatement | Expression)? ~ ";" ~ Expression? ~ ";" ~ Expression? ~ ")" ~ (Body | OneLineBody)
+}
+
+DoKW = ${
+    "do"
+}
+
+DoWhileStatement = {
+    DoKW ~ (Body | OneLineBody) ~ WhileKW ~ "(" ~ Expression ~ ")"
+}
+
+ElseIfKW = ${
+    ElseKW ~ WHITESPACE+ ~ IfKW
+}
+
+ElseIfStatement = {
+    ElseIfKW ~ "(" ~ Expression ~ ")" ~ (Body | OneLineBody)
+}
+
+ElseKW = ${
+    "else"
+}
+
+ElseStatement = {
+    ElseKW ~ (Body | OneLineBody)
+}
+
+IfKW = ${
+    "if"
+}
+
+IfStatement = {
+    IfKW ~ "(" ~ Expression ~ ")" ~ (Body | OneLineBody) ~ ElseIfStatement* ~ ElseStatement?
+}
+
+ReturnKW = ${
+    "return" ~ WHITESPACE+
+}
+
+ReturnStatement = {
+    ReturnKW ~ Expression
+}
+
+BreakKW = ${
+    "break" ~ WHITESPACE+
+}
+
+BreakStatement = {
+    BreakKW
+}
+
+ContinueKW = ${
+    "continue" ~ WHITESPACE+
+}
+
+ContinueStatement = {
+    ContinueKW
+}
+
+// Body
+//
+// - Logic container
+// - Composed of expressions and statements, and even bodies
+//
+
+BodyStatement = _{
+    (
+        (
+            DeclarationStatement ~ END_OF_LINE
+        )
+        |
+        (
+            Expression ~ END_OF_LINE
+        )
+        | ForStatement
+        | WhileStatement
+        | DoWhileStatement
+        | IfStatement
+        | ReturnStatement
+        | BreakStatement
+        | ContinueStatement
+        | Body
+        | END_OF_LINE
+    )
+}
+
+OneLineBody = {
+    BodyStatement
+}
+
+Body = {
+    "{" ~
+    (
+        BodyStatement
+    )*
+    ~ "}"
+}
+
+// Function
+//
+// - Used to factorize computations
+// - Cannot use signal operations and declaration
+//
+// function nbits(a) {
+//     var n = 1;
+//     var r = 0;
+//     while (n-1<a) {
+//         r++;
+//         n *= 2;
+//     }
+//     return r;
+// }
+//
+
+FunctionName = {
+    ASCII_ALPHA ~
+    (
+        ASCII_ALPHANUMERIC | "_"
+    )*
+}
+
+FunctionKW = ${
+    "function" ~ WHITESPACE+
+}
+
+FunctionBlock = {
+    FunctionKW ~ FunctionName ~ Parameters ~ Body
+}
+
+// Template
+//
+// - Used to define constraints and signals
+// - Used to create components
+// - Similar to functions, with extra features and operators
+//
+//  template NAND() {
+//      signal private input a;
+//      signal input b;
+//      signal output out;
+//
+//      out <== 1 - a*b;
+//      a*(a-1) === 0;
+//      b*(b-1) === 0;
+//  }
+//
+
+TemplateName = {
+    ASCII_ALPHA ~
+    (
+        ASCII_ALPHANUMERIC | "_"
+    )*
+}
+
+TemplateKW = ${
+    "template" ~ WHITESPACE+
+}
+
+TemplateBlock = {
+    TemplateKW ~ TemplateName ~ Parameters ~ Body
+}
+
+// pragma compiler directive
+//
+// - Used to set compiler version
+//
+//  pragma circom 2.1.0
+//
+
+PragmaKW = ${
+    "pragma" ~ WHITESPACE+
+}
+
+CircomKW = ${
+    "circom" ~ WHITESPACE+
+}
+
+CompilerDirective = ${
+    PragmaKW ~ CircomKW ~ E_SemVer ~ WHITESPACE+
+}
+
+
+// Include Statements
+//
+// - Used to include other circuit files
+//
+//  include "my_circuit.circom";
+//
+
+IncludeKW = ${
+    "include" ~ WHITESPACE+
+}
+
+IncludePathString = ${
+    STRING_DELIMITER ~ FilesystemPath ~ STRING_DELIMITER
+}
+
+IncludeStatement = {
+    IncludeKW ~ IncludePathString ~ END_OF_LINE
+}
+
+// Circuit
+//
+// This parses a source file for the following expressions and statements
+//
+
+Circuit = {
+    SOI  ~
+    (
+        CompilerDirective |
+        IncludeStatement |
+        FunctionBlock |
+        TemplateBlock |
+        (
+            DeclarationStatement ~ END_OF_LINE
+        )
+        |
+        WHITESPACE |
+        COMMENT
+    )+
+
+    ~ EOI
+}

@@ -1,0 +1,19 @@
+[package]
+name = "shortcircuit"
+version = "0.1.0"
+authors = ["Veljko Vranic (veljkovranic) <byblos94@gmail.com>"]
+
+[lib]
+name = "libsnarkrs"
+path = "src/lib/lib.rs"
+
+[[bin]]
+name = "snarkrs"
+path = "src/bin.rs"
+
+[dependencies]
+pest = "2.1.0"
+pest_derive = "2.1.0"
+
+[dev-dependencies]
+galvanic-assert = "0.8.7"
