@@ -155,7 +155,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "snarkrs"
+name = "shortcircuit"
 version = "0.1.0"
 dependencies = [
  "galvanic-assert",

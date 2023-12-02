@@ -3,7 +3,7 @@ pragma circom 2.1.6;
 include "circomlib/circuits/mux1.circom";
 include "circomlib/circuits/comparators.circom";
 
-template Omg(B) {
+template Omg(B, C) {
     
 }
 
