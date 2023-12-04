@@ -1,0 +1,9 @@
+{ 
+        "class": "go.GraphLinksModel",
+        "linkFromPortIdProperty": "fromPort",
+        "linkToPortIdProperty": "toPort",
+        "nodeDataArray": [
+            {"category":"privateInput", "key":"input1", "loc":"-150 -80" },
+            {"category":"output", "key":"output1", "loc":"200 -100" }
+        ]
+    }

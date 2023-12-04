@@ -1,5 +1,7 @@
 extern crate libsnarkrs;
+extern crate serde;
 
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 use libsnarkrs::parser::compile;
@@ -8,6 +10,7 @@ use libsnarkrs::parser::ast::Rule;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use serde::Serialize;
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Template {
@@ -360,8 +363,103 @@ fn main() -> std::io::Result<()> {
             
         }
     }
-    let set_of_used_templates = get_all_templates(&template_map, main_component);
+    let set_of_used_templates = get_all_templates(&template_map, main_component.clone());
     println!("Set of used templates {:?}", set_of_used_templates);
+
+    #[derive(Serialize)]
+    struct OutputFormat {
+        category: String,
+        key: String,
+        loc: String,
+    }
+
+    #[derive(Serialize)]
+    struct Link{
+        from: String,
+        fromPort: String,
+        to: String,
+        toPort: String
+    }
+    let mut components : Vec<OutputFormat> = vec![];
+    let mut links : Vec<Link> = vec![];
+
+    let mut curr_x = -80;
+    let mut curr_y = -80;
+
+    match template_map.get(&main_component.template_to_use) {
+        Some(main_template) => {
+            for input_signal in &main_template.private_input_signals {
+                components.push(OutputFormat{
+                    category: "privateInput".to_string(),
+                    key: input_signal.name.clone(),
+                    loc: format!("{}  {}", curr_x, curr_y)
+                });
+                links.push(Link{
+                    from: input_signal.name.clone(),
+                    fromPort: "out".to_string(),
+                    to: main_component.template_to_use.clone(),
+                    toPort: "in1".to_string()
+                });
+                curr_y += 50;
+            }
+        },
+        None => {
+            println!("main initialisation is wrong");
+        }
+    }
+
+    components.push(OutputFormat{
+        category: main_component.template_to_use.clone(),
+        key: main_component.template_to_use.clone(),
+        loc: format!("{}  {}", curr_x, curr_y)
+    });
+    let mut current_index = 1;
+    let mut prev_temp_name = main_component.template_to_use.clone();
+    for template in &set_of_used_templates {
+        if template.name.eq(&main_component.template_to_use) {
+            continue;
+        }
+        curr_x = curr_x + 40;
+        // curr_y = curr_y + 20; 
+        components.push(OutputFormat{
+            category: template.name.clone(),
+            key: template.name.clone(),
+            loc: format!("{} {}", curr_x, curr_y)
+        });
+        links.push(Link{
+            from: prev_temp_name.clone(),
+            fromPort: "out".to_string(),
+            to: template.name.clone(),
+            toPort: "in".to_string()
+        });
+        prev_temp_name = template.name.clone();
+    }
+    let serialized_nodes = serde_json::to_string(&components).unwrap();
+    let serialized_links = serde_json::to_string(&links).unwrap();
+
+    let json_data = format!(r#"{{
+        "class": "go.GraphLinksModel",
+        "linkFromPortIdProperty": "fromPort",
+        "linkToPortIdProperty": "toPort",
+        "nodeDataArray": {}, 
+        "linkDataArray": {}
+    }}"#, serialized_nodes, serialized_links);
+
+    // Create a file
+    let file_path = "src/visual/logicCircuit.html";
+
+    // Read the content of the HTML file
+    let content = fs::read_to_string(file_path)?;
+
+    // The string to replace
+    let to_replace = "###replaceme###";
+
+    let updated_content = content.replace(to_replace, &json_data);
+
+    // Write the updated content back to the file
+    let mut file = fs::File::create(file_path)?;
+    file.write_all(updated_content.as_bytes())?;
+
     Ok(())
 }
 
