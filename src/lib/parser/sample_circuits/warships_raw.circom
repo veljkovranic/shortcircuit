@@ -15,6 +15,8 @@ template Battleship(N) {
     signal output answer;
 
     var isHit = 0;
+    component isEqualCheck = IsEqual();
+
     component checkField[N][N];
     component isEqualI[N][N];
     component isEqualJ[N][N];
