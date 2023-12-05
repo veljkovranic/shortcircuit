@@ -353,8 +353,12 @@ TypedComponentDeclaration = {
     ComponentDeclarationKW ~ E_VariableName ~ (TypedComponentConstructorOperatorOpen ~ E_20_ArgumentsContent? ~ TypedComponentConstructorOperatorClose) ~ E_VariableName ~ ArrayDeclaration*
 }
 
+SignalDeclarationWithConstraint = {
+    SignalDeclarationKW ~ E_VariableName ~ ArrayDeclaration* ~ (E_2_SignalLeftHandOperator ~ Expression)?
+}
+
 DeclarationStatement = {
-    TypedComponentDeclaration | ((SignalDeclarationKW | VariableDeclarationKW | ComponentDeclarationKW) ~ E_VariableName ~ ArrayDeclaration* ~ ("=" ~ Expression)?)
+    TypedComponentDeclaration | SignalDeclarationWithConstraint | ((VariableDeclarationKW | ComponentDeclarationKW) ~ E_VariableName ~ ArrayDeclaration* ~ ("=" ~ Expression)?)
 }
 
 // Control Statements

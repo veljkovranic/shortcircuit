@@ -8,8 +8,8 @@ template Multiplier4() {
      signal input in4;
      signal input mult;
      signal output out;
-    //  signal tmp1 <== in1*in2;
-    //  signal tmp2 <== in3*in4;
+     signal tmp1 <== in1*in2;
+     signal tmp2 <== in3*in4;
      component isEqual = IsEqual();
      isEqual.in[0] <== mult;
      isEqual.in[1] <== tmp1*tmp2;
