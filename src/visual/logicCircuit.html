@@ -163,18 +163,8 @@
             { portId: "", alignment: new go.Spot(0, 0.5) })
         );
 
-        var templateTemplate =
-        $(go.Node, "Spot", nodeStyle(),
-          $(go.Shape, "Rectangle", templateStyle(),
-            { fill: blue }),  // override the default fill (from shapeStyle()) to be green
-          $(go.Shape, "Rectangle", portStyle(true),  
-            { portId: "in", alignment: new go.Spot(0, 0.5) }),
-          $(go.Shape, "Rectangle", portStyle(false),
-            { portId: "out", alignment: new go.Spot(1, 0.5) }),
-            $(go.TextBlock,         // group title
-              { alignment: go.Spot.Center, font: "12pt Sans-Serif" },
-              new go.Binding("text", "key"))
-        );  
+      
+      
 
       var andTemplate =
         $(go.Node, "Spot", nodeStyle(),
@@ -203,7 +193,7 @@
       myDiagram.nodeTemplateMap.add("privateInput", privateInputTemplate);
       myDiagram.nodeTemplateMap.add("publicInput", publicInputTemplate);
       myDiagram.nodeTemplateMap.add("output", outputTemplate);
-      myDiagram.nodeTemplateMap.add("template", templateTemplate);
+      
       myDiagram.nodeTemplateMap.add("and", andTemplate);
       myDiagram.nodeTemplateMap.add("or", orTemplate);
 
@@ -214,9 +204,9 @@
         { category: "privateInput" },
         { category: "publicInput" },
         { category: "output" },
-        { category: "template" },
         { category: "and" },
         { category: "or" },
+        
       ];
 
       // load the initial diagram
@@ -335,8 +325,8 @@
         "class": "go.GraphLinksModel",
         "linkFromPortIdProperty": "fromPort",
         "linkToPortIdProperty": "toPort",
-        "nodeDataArray": [{"category":"none","key":"Multiplier4","loc":"200  0","isGroup":true,"group":""},{"category":"none","key":"Private inputs","loc":"0  0","isGroup":true,"group":""},{"category":"privateInput","key":"in1","loc":"0  0","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"in2","loc":"0  50","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"in3","loc":"0  100","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"in4","loc":"0  150","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"mult","loc":"0  200","isGroup":false,"group":"Private inputs"},{"category":"temp","key":"tmp1","loc":"50  250","isGroup":false,"group":"Multiplier4"},{"category":"temp","key":"in1*in2","loc":"50  300","isGroup":false,"group":"Multiplier4"},{"category":"temp","key":"tmp2","loc":"50  320","isGroup":false,"group":"Multiplier4"},{"category":"temp","key":"in3*in4","loc":"50  370","isGroup":false,"group":"Multiplier4"},{"category":"outputgroup","key":"Output","loc":"400  0","isGroup":true,"group":""},{"category":"temp","key":"isEqual.in[0]<==mult","loc":"100  390","isGroup":false,"group":"Multiplier4"},{"category":"temp","key":"isEqual.in[1]<==tmp1*tmp2","loc":"100  460","isGroup":false,"group":"Multiplier4"},{"category":"temp","key":"out<==isEqual.out","loc":"100  530","isGroup":false,"group":"Multiplier4"},{"category":"output","key":"out","loc":"150  600","isGroup":false,"group":"Output"},{"category":"template","key":"isEqual","loc":"190 620","isGroup":false,"group":"Multiplier4"}], 
-        "linkDataArray": [{"from":"in1","fromPort":"out","to":"in1*in2","toPort":"in1"},{"from":"in2","fromPort":"out","to":"in1*in2","toPort":"in1"},{"from":"in1*in2","fromPort":"out","to":"tmp1","toPort":"in1"},{"from":"in3","fromPort":"out","to":"in3*in4","toPort":"in1"},{"from":"in4","fromPort":"out","to":"in3*in4","toPort":"in1"},{"from":"in3*in4","fromPort":"out","to":"tmp2","toPort":"in1"},{"from":"mult","fromPort":"out","to":"isEqual.in[0]<==mult","toPort":"in"},{"from":"isEqual.in[0]<==mult","fromPort":"out","to":"isEqual","toPort":"in"},{"from":"tmp1","fromPort":"out","to":"isEqual.in[1]<==tmp1*tmp2","toPort":"in"},{"from":"tmp2","fromPort":"out","to":"isEqual.in[1]<==tmp1*tmp2","toPort":"in"},{"from":"isEqual.in[1]<==tmp1*tmp2","fromPort":"out","to":"isEqual","toPort":"in"},{"from":"isEqual","fromPort":"out","to":"out<==isEqual.out","toPort":"in"},{"from":"out<==isEqual.out","fromPort":"out","to":"out","toPort":"in"}]
+        "nodeDataArray": [{"category":"none","key":"Battleship","loc":"200  0","isGroup":true,"group":""},{"category":"none","key":"Private inputs","loc":"0  0","isGroup":true,"group":""},{"category":"privateInput","key":"board","loc":"0  0","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"ii","loc":"0  50","isGroup":false,"group":"Private inputs"},{"category":"privateInput","key":"jj","loc":"0  100","isGroup":false,"group":"Private inputs"},{"category":"outputgroup","key":"Output","loc":"400  0","isGroup":true,"group":""},{"category":"temp","key":"answer<==isHit","loc":"100  150","isGroup":false,"group":"Battleship"},{"category":"output","key":"answer","loc":"150  220","isGroup":false,"group":"Output"}], 
+        "linkDataArray": [{"from":"isHit","fromPort":"out","to":"answer<==isHit","toPort":"in"},{"from":"answer<==isHit","fromPort":"out","to":"answer","toPort":"in"}]
     }
     </textarea>
   </div>

@@ -3,10 +3,6 @@ pragma circom 2.1.6;
 include "circomlib/circuits/mux1.circom";
 include "circomlib/circuits/comparators.circom";
 
-template Omg(B, C) {
-    
-}
-
 template Battleship(N) {
     signal input board[N][N];
     signal input ii;
@@ -20,7 +16,6 @@ template Battleship(N) {
     component checkField[N][N];
     component isEqualI[N][N];
     component isEqualJ[N][N];
-
 
     for (var i = 0; i < N; i++) {
         for (var j = 0; j < N; j++) {
@@ -43,7 +38,7 @@ template Battleship(N) {
 }
 
 
-component main = Battleship(3);
+component main {public [board]} = Battleship(3);
 
 /* INPUT = {
     "board": [

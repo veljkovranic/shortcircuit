@@ -349,8 +349,12 @@ TypedComponentConstructorOperatorClose = {
     ")"
 }
 
-TypedComponentDeclaration = {
-    ComponentDeclarationKW ~ E_VariableName ~ (TypedComponentConstructorOperatorOpen ~ E_20_ArgumentsContent? ~ TypedComponentConstructorOperatorClose) ~ E_VariableName ~ ArrayDeclaration*
+PublicSignalBlock = {
+	"{" ~ "public" ~ ArrayDeclaration* ~ "}"
+}
+
+ComponentDeclaration = {
+    ComponentDeclarationKW ~ E_VariableName ~ (PublicSignalBlock | ArrayDeclaration*)? ~ ("=" ~ Expression)?
 }
 
 SignalDeclarationWithConstraint = {
@@ -358,7 +362,7 @@ SignalDeclarationWithConstraint = {
 }
 
 DeclarationStatement = {
-    TypedComponentDeclaration | SignalDeclarationWithConstraint | ((VariableDeclarationKW | ComponentDeclarationKW) ~ E_VariableName ~ ArrayDeclaration* ~ ("=" ~ Expression)?)
+    ComponentDeclaration | SignalDeclarationWithConstraint | ((VariableDeclarationKW) ~ E_VariableName ~ ArrayDeclaration* ~ ("=" ~ Expression)?)
 }
 
 // Control Statements

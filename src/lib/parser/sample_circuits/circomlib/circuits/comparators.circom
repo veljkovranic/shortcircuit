@@ -35,7 +35,8 @@ template IsZero() {
 
 
 template IsEqual() {
-    signal input in[2];
+    signal input in1;
+    signal input in2;
     signal output out;
 
     component isz = IsZero();
