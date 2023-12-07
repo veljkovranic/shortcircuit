@@ -74,12 +74,17 @@ E_Hexadecimal = ${
     "0x" ~ ASCII_HEX_DIGIT+
 }
 
+
 E_VariableName = ${
   (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
 }
 
 E_TerminalValue = _{
-    E_Hexadecimal | E_Decimal | E_VariableName
+    E_ComplexVariableName | E_Hexadecimal | E_Decimal
+}
+
+E_ComplexVariableName = ${
+    E_VariableName ~ (ArrayDeclaration*)? ~ (E_19_MemberAccessOperator ~ E_VariableName ~ (ArrayDeclaration*)?)?
 }
 
 E_ArrayOperatorOpen = {

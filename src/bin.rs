@@ -13,14 +13,15 @@ use std::collections::VecDeque;
 use serde::Serialize;
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
-struct Template {
+struct Template{
     name: String,
     params: Vec<String>,
     private_input_signals: Vec<Signal>,
     output_signals: Vec<Signal>,
     intermediate_signals: Vec<Signal>,
     components: Vec<Component>,
-    constraints: Vec<Expression>
+    constraints: Vec<Expression>,
+    instructions: Vec<SingleCommand>,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -53,7 +54,7 @@ struct Component {
     arguments: Vec<u32>,
 }
 
-#[derive(Eq, Hash, PartialEq, Debug)]
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct DeclStatement {
     decl_type: DeclType,
     name: String,
@@ -87,8 +88,50 @@ struct ForLoop {
     start_value: u32,
     condition: BoolExpression,
     step: i32,
-    body: Vec<String>
+    body: Vec<SingleCommand>
 }
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+struct Variable{
+    id: String,
+    indexing: Vec<String>,
+    sub_variable: Option<Box<Variable>>,
+    is_constant: bool,
+    numerical_value: u32,
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+struct Evaluation {
+    variables: Vec<Variable>,
+    operation: Operation,
+    params: Vec<Variable>
+}
+
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+enum SingleCommand {
+    ForLoop(ForLoop),
+    Instruction(Instruction),
+    DeclarationStatement(DeclStatement)
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+enum Operation {
+    Multiply,
+    ComponentInstance,
+    Id
+}
+//Make this be enum
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+struct Instruction {
+    is_constraint: bool,
+    is_assignment: bool,
+    constraint_receiver: Option<Variable>,
+    constraint_expression: Option<Evaluation>,
+    assignment_receiver: Option<Variable>,
+    assignment_expression: Option<Evaluation>,
+}
+
 fn parse_expression(expression: &Token) -> Expression {
     let mut result = "".to_string();
     let mut value = "".to_string();
@@ -130,8 +173,10 @@ fn parse_expression(expression: &Token) -> Expression {
 fn parse_array_declaration(array_decl_root: &Vec<Token>) -> String {
     if let Token::NonTerminal(ntt) = &array_decl_root[1] {
         if let Token::NonTerminal(subntt) = &ntt.subrules[0] {
-            if let Token::Terminal(tt) = &subntt.subrules[0] {
-                return tt.content.clone();
+            if let Token::NonTerminal(subnntt) = &subntt.subrules[0] {
+                if let Token::Terminal(tt) = &subnntt.subrules[0] {
+                    return tt.content.clone();
+                }
             }
         }
     }
@@ -216,7 +261,7 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
                 }
                 if let Token::NonTerminal(subsubtt) = &ntt.subrules[ntt.subrules.len() - 1] {
                     if subsubtt.rule == Rule::Expression {
-                         println!("{:?}", subsubtt.subrules);
+                        // println!("{:?}", subsubtt.subrules);
                         expression = parse_expression(&ntt.subrules[ntt.subrules.len() - 1]);
                     }
                 } 
@@ -246,11 +291,12 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
                         }
                         // = TemplateName(A, B, C)
                         if subsubtt.rule == Rule::Expression {
-                            // println!("EXPRESSION PRASE {:?}", subsubtt.subrules);
                             if let Token::NonTerminal(exprntt) = &subsubtt.subrules[0] {
-                                if let Token::Terminal(vartt) = &exprntt.subrules[0] {
-                                    //Template name is always first
-                                    template_to_use = vartt.content.clone();
+                                if let Token::NonTerminal(exprnntt) = &exprntt.subrules[0] {
+                                    if let Token::Terminal(vartt) = &exprnntt.subrules[0] {
+                                        //Template name is always first
+                                        template_to_use = vartt.content.clone();
+                                    }
                                 }
                             }
                             if subsubtt.subrules.len() > 3 {
@@ -282,7 +328,8 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
                 name = subtt.content.clone();
             }
             // = is in play, or maybe array?
-            if declaration_statement_root.len() > 1 {
+            if declaration_statement_root.len() > 2 {
+                // println!("decl {:?}", declaration_statement_root);
                 if let Token::NonTerminal(subntt) = &declaration_statement_root[2] {
                     expression.numerical_value = compute_value_of_expression(&subntt.subrules);
                 }
@@ -302,28 +349,91 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
     statement
 }
 
-#[derive(Debug)]
-enum SingleCommmand {
-    ForLoop(ForLoop),
-    Expression(Expression),
-    // IfCondition,
-    // WhileLoop
+fn parse_compl_variable(container: &Token) -> Variable {
+    let mut compl_variable = Variable{
+        id: "".to_string(),
+        indexing: vec![],
+        is_constant: false,
+        numerical_value: 0,
+        sub_variable: Some(Box::new(Variable{
+            id: "".to_string(),
+            indexing: vec![],
+            sub_variable: None,
+            is_constant: false,
+            numerical_value: 0})),
+    };
+    if let Token::NonTerminal(x) = &container {
+        if let Token::NonTerminal(subntt) = &x.subrules[0] {
+            if let Token::Terminal(tt) = &subntt.subrules[0] {
+                compl_variable.id = tt.content.clone();
+            }
+        
+            let mut before_point_operator = true;
+
+            for op_index in 1..subntt.subrules.len() {
+                let mut inside = "".to_string();
+                if before_point_operator {
+                    if let Token::Terminal(tt) = &subntt.subrules[op_index] {
+                        if tt.rule == Rule::E_19_MemberAccessOperator {
+                            before_point_operator = false;
+                        }
+                    }
+                } else {
+                    if let Token::Terminal(tt) = &subntt.subrules[op_index] {
+                        match compl_variable.sub_variable {
+                            Some(ref mut var) => {var.id = tt.content.clone();},
+                            None => {}
+                        }
+                    }
+                }
+                if let Token::NonTerminal(subnntt) = &subntt.subrules[op_index] {
+                    if subnntt.rule == Rule::ArrayDeclaration {
+                        if let Token::NonTerminal(exp) = &subnntt.subrules[1] {
+                            if let Token::NonTerminal(value) = &exp.subrules[0] {
+                                if let Token::NonTerminal(cv) = &value.subrules[0] {
+                                    if let Token::Terminal(var) = &cv.subrules[0] {
+                                        inside = var.content.clone();
+                                    }
+                                } else if let Token::Terminal(dec) = &value.subrules[0] {
+                                    inside = dec.content.clone();
+                                }
+                            }
+                        }
+                        if before_point_operator {
+                            compl_variable.indexing.push(inside);
+                        } else {
+                            match compl_variable.sub_variable {
+                                Some(ref mut var) => {
+                                    var.indexing.push(inside);  
+                                },
+                                None => {}
+                            }
+                        }
+                        // println!("Argument contents {:?}", subntt.subrules);
+                    }
+                }
+            }
+        } else if let Token::Terminal(subtt) = &x.subrules[0] {
+            compl_variable.is_constant = true;
+            compl_variable.numerical_value = subtt.content.parse::<u32>().unwrap();
+        }
+    }
+    compl_variable
 }
 
-fn parse_body_nested(elements: &Vec<Token>) {
-    let mut lines : Vec<SingleCommmand> = vec![];
+fn parse_body_nested(elements: &Vec<Token>) -> Vec<SingleCommand> {
+    let mut lines : Vec<SingleCommand> = vec![];
     for element in elements {
         if let Token::NonTerminal(ntt) = element {
             if (ntt.rule == Rule::ForStatement) {
                 lines.push(parse_for_loop(&ntt.subrules));
             }
             if (ntt.rule == Rule::Expression) {
-                // println!("Expression subrules {:?}", ntt.subrules);
                 let mut index_split = 0;
                 let mut assignment_to_variable = false;
                 let mut is_constraint = false;
                 let mut left_constraint = false;
-                for op_index in 0..ntt.subrules.len()-1 {
+                for op_index in 0..ntt.subrules.len() {
                     if let Token::Terminal(tt) = &ntt.subrules[op_index] {
                         if tt.rule == Rule::E_4_AssignmentOperator || tt.rule == Rule::E_2_SignalLeftHandOperator || tt.rule == Rule::E_3_SignalRightHandOperator {
                             index_split = op_index;
@@ -344,76 +454,65 @@ fn parse_body_nested(elements: &Vec<Token>) {
                         }
                     }
                 }
+                let lhs = parse_compl_variable(&ntt.subrules[0]);
+                let mut operation = Operation::Id;
+                let mut contains_operation : bool = false;
+                let mut contains_math_operation : bool = false;
+                let mult_sign = String::from("*");
+                let mut vars = vec![];
+                for op_index in index_split+1..ntt.subrules.len() {
+                    if let Token::Terminal(tt) = &ntt.subrules[op_index] {
+                        if tt.content.eq(&mult_sign) {
+                            contains_math_operation = true;
+                            operation = Operation::Multiply;
+                        }
+                        if tt.rule == Rule::E_20_BracedOperatorOpen {
+                            contains_operation = true;
+                            operation = Operation::ComponentInstance;
+                        }
+                    } else if let Token::NonTerminal(nntt) = &ntt.subrules[op_index]{
+                        vars.push(parse_compl_variable(&ntt.subrules[op_index]));
+                    }
+                }
 
-                #[derive(Eq, Hash, PartialEq, Debug, Clone)]
-                struct Variable{
-                    id: String,
-                    indexing: Vec<String>,
-                    sub_variable: Option<Box<Variable>>
+                let mut assignment_receiver = None;
+                let mut assignment_expression = None;
+                let mut constraint_receiver = None;
+                let mut constraint_expression = None;
+                if is_constraint {
+                    if left_constraint {
+                        assignment_receiver = Some(lhs);
+                        assignment_expression = Some(Evaluation{
+                            variables: vars.clone(),
+                            operation: operation,
+                            params: vec![]
+                        });
+                    }
+                } else {
+                    constraint_receiver = Some(lhs);
+                    constraint_expression = Some(Evaluation{
+                        variables: vars.clone(),
+                        operation: operation,
+                        params: vec![]
+                    });
                 }
-                let mut compl_variable = Variable{
-                    id: "".to_string(),
-                    indexing: vec![],
-                    sub_variable: Some(Box::new(Variable{
-                        id: "".to_string(),
-                        indexing: vec![],
-                        sub_variable: None})),
-                };
-                if let Token::NonTerminal(subntt) = &ntt.subrules[0] {
-                    if let Token::Terminal(tt) = &subntt.subrules[0] {
-                        compl_variable.id = tt.content.clone();
-                    }
-                }
-                let mut before_point_operator = true;
-                for op_index in 1..index_split - 1 {
-                    let mut inside = "".to_string();
-                    let mut after_id = "".to_string();
-                    if before_point_operator {
-                        if let Token::Terminal(tt) = &ntt.subrules[op_index] {
-                            if tt.rule == Rule::E_19_MemberAccessOperator {
-                                before_point_operator = false;
-                            }
-                        }
-                    }
-                    if let Token::NonTerminal(subntt) = &ntt.subrules[op_index] {
-                        if subntt.rule == Rule::E_20_ArgumentsContent {
-                            if let Token::NonTerminal(exp) = &subntt.subrules[0] {
-                                if let Token::NonTerminal(value) = &exp.subrules[0] {
-                                    if let Token::Terminal(var) = &value.subrules[0] {
-                                        inside = var.content.clone();
-                                    }
-                                }
-                            }
-                            if before_point_operator {
-                                compl_variable.indexing.push(inside);
-                            } else {
-                                match compl_variable.sub_variable {
-                                    Some(ref mut var) => {
-                                        var.indexing.push(inside);  
-                                    },
-                                    None => {}
-                                }
-                            }
-                            // println!("Argument contents {:?}", subntt.subrules);
-                        }
-                        if subntt.rule == Rule::E_Value {
-                            if let Token::Terminal(tt) = &subntt.subrules[0] {
-                                match compl_variable.sub_variable {
-                                    Some(ref mut var) => {var.id = tt.content.clone();},
-                                    None => {}
-                                }
-                            }
-                        }
-                    }
-                } 
-                println!("Varsss {:?}", compl_variable);
-                println!("What is it: assignment {}, constraint {}, left constraint {}", assignment_to_variable, is_constraint, left_constraint);
+                lines.push(SingleCommand::Instruction(Instruction{
+                    is_constraint: is_constraint,
+                    is_assignment: assignment_to_variable,
+                    assignment_receiver: assignment_receiver,
+                    assignment_expression: assignment_expression,
+                    constraint_receiver: constraint_receiver,
+                    constraint_expression: constraint_expression
+                }));
+                // println!("Varsss {:?}", lhs);
+                // println!("What is it: assignment {}, constraint {}, left constraint {}", assignment_to_variable, is_constraint, left_constraint);
             }
         }
     }
+    lines
 }
 
-fn parse_for_loop(elements: &Vec<Token>) -> SingleCommmand {       
+fn parse_for_loop(elements: &Vec<Token>) -> SingleCommand {       
     let mut for_loop = ForLoop {
         index: "".to_string(),
         start_value: 0,
@@ -425,7 +524,6 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommmand {
         step: 0,
         body: vec![]
     };
-    // println!("Found {:?}", subsubtt.subrules);
     // for (___;  ; ) 
     if let Token::NonTerminal(ntt) = &elements[1] {
         if ntt.rule == Rule::DeclarationStatement {
@@ -442,8 +540,10 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommmand {
         if ntt.rule == Rule::Expression {
             if let Token::NonTerminal(subntt) = &ntt.subrules[0] {
                 if subntt.rule == Rule::E_Value {
-                    if let Token::Terminal(subtt) = &subntt.subrules[0] {
-                        lhs = subtt.content.clone();
+                    if let Token::NonTerminal(subnntt) = &subntt.subrules[0] {
+                        if let Token::Terminal(subtt) = &subnntt.subrules[0] {
+                            lhs = subtt.content.clone();
+                        }
                     }
                 }
             }
@@ -454,8 +554,10 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommmand {
             }
             if let Token::NonTerminal(subntt) = &ntt.subrules[2] {
                 if subntt.rule == Rule::E_Value {
-                    if let Token::Terminal(subtt) = &subntt.subrules[0] {
-                        rhs = subtt.content.clone();
+                    if let Token::NonTerminal(subnntt) = &subntt.subrules[0] {
+                        if let Token::Terminal(subtt) = &subnntt.subrules[0] {
+                            rhs = subtt.content.clone();
+                        }
                     }
                 }
             }
@@ -487,11 +589,11 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommmand {
     if let Token::NonTerminal(ntt) = &elements[4] {
         if ntt.rule == Rule::Body {
             let parsed_body = parse_body_nested(&ntt.subrules);
-            println!("{:?}", parsed_body);
+            for_loop.body = parsed_body;
         }
     }
 
-    SingleCommmand::ForLoop(for_loop)
+    SingleCommand::ForLoop(for_loop)
 }
 
 fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
@@ -502,6 +604,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
     let mut intermediate_signals: Vec<Signal> = vec![];
     let mut components: Vec<Component> = vec![];
     let mut constraints: Vec<Expression> = vec![];
+    let mut commands: Vec<SingleCommand> = vec![];
 
     if let Token::Terminal(subtt) = &template_root_token[1] {
         if subtt.rule == Rule::TemplateName {
@@ -523,6 +626,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                 if let Token::NonTerminal(subsubtt) = subsubtoken {
                     if subsubtt.rule == Rule::DeclarationStatement {
                         let statement = parse_declaration_statement(&subsubtt.subrules);
+                        commands.push(SingleCommand::DeclarationStatement(statement.clone()));
                         if statement.decl_type == DeclType::Signal {
                             if statement.direction == SignalDirection::Output {
                                 output_signals.push(Signal{
@@ -559,7 +663,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                     }
                     if subsubtt.rule == Rule::ForStatement {
                         let for_loop = parse_for_loop(&subsubtt.subrules);
-                        println!("{:?}", for_loop);
+                        commands.push(for_loop);
                     }
                     if subsubtt.rule == Rule::Expression {
                         // println!("Found {:?}", subsubtt.subrules);
@@ -576,6 +680,9 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                         let index = match expression.variables.iter().position(|x| *x == "in".to_string()) { Some(index) => { expression.variables.remove(index);}, None => {}};
                         let index = match expression.variables.iter().position(|x| *x == "out".to_string()) { Some(index) => { expression.variables.remove(index);}, None => {}};
                         constraints.push(expression);
+                        // commands.push(SingleCommand::Instruction{
+                           
+                        // })
                         // println!("Exp {:?}", expression);
                     }
                 } else if let Token::Terminal(subsubtt) = subsubtoken {
@@ -592,6 +699,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
         intermediate_signals: intermediate_signals,
         components: components,
         constraints: constraints,
+        instructions: commands,
     };
     temp
 }
@@ -844,7 +952,7 @@ fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Compone
             }
         },
         None => {
-            println!("main initialisation is wrong");
+            println!("main initialization is wrong");
         }
     }
 
@@ -873,7 +981,7 @@ fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Compone
     let to_replace = "###replaceme###";
     let to_replace_template = "//replace with template";
 
-    println!("{}", template_data);
+    // println!("{}", template_data);
     let mut updated_content = content.replace(to_replace, &json_data);
     updated_content = updated_content.replace(to_replace_template, &template_data);
     updated_content = updated_content.replace("//replace_to_add_template_to_pallete", &pallete_data);
@@ -927,6 +1035,62 @@ fn get_actual_value_for_signals_components(csize_per_dimension: &Vec<String>, cn
     actual_value_vector
 }
 
+fn evaluate(bool_exp: BoolExpression, variable_to_value_map:&mut HashMap<String, u32>) -> bool{
+    let mut lhs_value :u32 = 0;
+    let mut rhs_value :u32 = 0;
+    match variable_to_value_map.get(&bool_exp.lhs) {
+        Some(lhs_v) => {lhs_value=lhs_v.clone()},
+        None => {println!("PANIC!!");}
+    }
+    match variable_to_value_map.get(&bool_exp.rhs) {
+        Some(rhs_v) => {rhs_value=rhs_v.clone()},
+        None => {println!("PANIC!!");}
+    }
+    println!("{} {}", lhs_value, rhs_value );
+    if bool_exp.operation.eq(&"<".to_string()) {
+        return lhs_value < rhs_value;
+    }
+    if bool_exp.operation.eq(&"<=".to_string()) {
+        return lhs_value <= rhs_value;
+    }
+    if bool_exp.operation.eq(&">".to_string()) {
+        return lhs_value > rhs_value;
+    }
+    if bool_exp.operation.eq(&">=".to_string()) {
+        return lhs_value >= rhs_value;
+    }
+    false
+}
+
+fn execute(single_command:&SingleCommand, variable_to_value_map: &mut HashMap<String, u32>) {
+    match single_command {
+        SingleCommand::ForLoop(for_loop) => {
+            println!("For loop {}",for_loop.index);
+            let mut curr_value = for_loop.start_value;
+            variable_to_value_map.insert(for_loop.index.clone(), for_loop.start_value.clone());
+            println!("Values {:?}", variable_to_value_map);
+            let mut condition = true;//evaluate(for_loop.condition.clone(), variable_to_value_map);
+            while condition {
+                // println!("Body {:?}", for_loop.body.clone());
+
+                for command in for_loop.body.clone() {
+                    execute(&command, variable_to_value_map);
+                }
+                curr_value = curr_value + for_loop.step as u32;
+                variable_to_value_map.insert(for_loop.index.clone(), curr_value);
+                condition = evaluate(for_loop.condition.clone(), variable_to_value_map);
+            }
+        },
+        SingleCommand::Instruction(instruction) => {
+            println!("Executing instruction!");
+        },
+        SingleCommand::DeclarationStatement(decl_statement) => {
+            println!("Executing declaration!");
+        },
+    }
+
+}
+
 fn main() -> std::io::Result<()> {
     let mut template_map: HashMap<String, Template> = HashMap::new();
     let mut main_component: Component = Component{
@@ -945,7 +1109,7 @@ fn main() -> std::io::Result<()> {
 
     for (path, source_file) in ctx.files {
         if !path.clone().into_os_string().into_string().unwrap().contains("warships_raw") {
-            continue;
+            // continue;
         }
         // println!("{:?}", path);
         if let libsnarkrs::parser::compile::LoadAttempt::Loaded(file) = source_file {
@@ -968,7 +1132,7 @@ fn main() -> std::io::Result<()> {
                     // for param in template.params {
                     //     // println!(" Params: {}", param);
                     // }
-                    // // println!("Private input length {}", template.private_input_signals.len());
+                    // println!("Private input length {}", template.private_input_signals.len());
                     // for pi_signal in template.private_input_signals {
                     //     println!(" Private input signal: {}", pi_signal.name);
                     //     println!(" Private signal dimension: {}", pi_signal.size_per_dimension.len());
@@ -982,14 +1146,13 @@ fn main() -> std::io::Result<()> {
                     //     println!(" Intermediate signal dimension: {}", i_signal.size_per_dimension.len());
                     // }
                     // for components in template.components {
-                    //     // println!(" Components: {}", components.name);
-                    //     // println!(" Component dimension: {}", components.size_per_dimension.len());
-                    //     // println!(" Component is of type: {}", components.template_to_use);
+                    //     println!(" Components: {}", components.name);
+                    //     println!(" Component dimension: {}", components.size_per_dimension.len());
+                    //     println!(" Component is of type: {}", components.template_to_use);
                     // }
                 }
-                
             }
-            
+
         }
     }
 
@@ -1005,7 +1168,11 @@ fn main() -> std::io::Result<()> {
     let mut actual_output_signal_vector : Vec<String> = vec![];
     let mut actual_component_vector : Vec<String> = vec![];
     let mut actual_intermediate_signal_vector : Vec<String> = vec![];
-
+    // struct Var {
+    //     name: String,
+    //     type: String
+    // }
+    // let mut heap : HashSet<Var>;
     let current_component = main_component.clone();
     while running {
         if current_component.template_to_use.len() == 0 {
@@ -1017,8 +1184,8 @@ fn main() -> std::io::Result<()> {
                     variable_to_value_map.insert(template.params[param_index].clone(), current_component.arguments[param_index]);
                 }
                 println!("{:?}", variable_to_value_map);
-
                 for signal in &template.private_input_signals {
+                    // println!("{:?}", signal);
                     actual_input_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &variable_to_value_map));
                 }
                 for signal in &template.output_signals {
@@ -1030,7 +1197,12 @@ fn main() -> std::io::Result<()> {
                 for component in &template.components {
                     actual_component_vector.append(&mut get_actual_value_for_signals_components(&component.size_per_dimension, &component.name, &variable_to_value_map));
                 }
-                break;
+                
+                // declarations done
+                running= false;
+                for command in &template.instructions {
+                    execute(&command, &mut variable_to_value_map);
+                }
             },
             None => {
                 running = false;
@@ -1044,7 +1216,7 @@ fn main() -> std::io::Result<()> {
     println!("{:?}", actual_component_vector);
 
     //Drawing
-    draw_it_out(&template_map, main_component.clone());
+    // draw_it_out(&template_map, main_component.clone());
 
     Ok(())
 }
