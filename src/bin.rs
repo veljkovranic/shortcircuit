@@ -43,7 +43,7 @@ struct Signal {
     name: String,
     direction: SignalDirection,
     size_per_dimension: Vec<String>,
-    expression: Expression
+    expression: Expression,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -481,16 +481,16 @@ fn parse_body_nested(elements: &Vec<Token>) -> Vec<SingleCommand> {
                 let mut constraint_expression = None;
                 if is_constraint {
                     if left_constraint {
-                        assignment_receiver = Some(lhs);
-                        assignment_expression = Some(Evaluation{
+                        constraint_receiver  = Some(lhs);
+                        constraint_expression = Some(Evaluation{
                             variables: vars.clone(),
                             operation: operation,
                             params: vec![]
                         });
                     }
                 } else {
-                    constraint_receiver = Some(lhs);
-                    constraint_expression = Some(Evaluation{
+                    assignment_receiver = Some(lhs);
+                    assignment_expression = Some(Evaluation{
                         variables: vars.clone(),
                         operation: operation,
                         params: vec![]
@@ -641,7 +641,6 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                                     direction: statement.direction,
                                     size_per_dimension: statement.size_per_dimension.clone(),
                                     expression: statement.expression.clone(),
-
                                 });
                             } else {
                                 intermediate_signals.push(Signal{
@@ -699,8 +698,8 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
         intermediate_signals: intermediate_signals,
         components: components,
         constraints: constraints,
-        instructions: commands,
-    };
+        instructions: commands
+        };
     temp
 }
 
@@ -1046,43 +1045,133 @@ fn evaluate(bool_exp: BoolExpression, variable_to_value_map:&mut HashMap<String,
         Some(rhs_v) => {rhs_value=rhs_v.clone()},
         None => {println!("PANIC!!");}
     }
-    println!("{} {}", lhs_value, rhs_value );
-    if bool_exp.operation.eq(&"<".to_string()) {
+    let operation = bool_exp.operation.trim();
+    if operation.eq("<") {
         return lhs_value < rhs_value;
     }
-    if bool_exp.operation.eq(&"<=".to_string()) {
+    if operation.eq("<=") {
         return lhs_value <= rhs_value;
     }
-    if bool_exp.operation.eq(&">".to_string()) {
+    if operation.eq(">") {
         return lhs_value > rhs_value;
     }
-    if bool_exp.operation.eq(&">=".to_string()) {
+    if operation.eq(">=") {
         return lhs_value >= rhs_value;
     }
     false
 }
 
-fn execute(single_command:&SingleCommand, variable_to_value_map: &mut HashMap<String, u32>) {
+fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut HashMap<String, u32>) -> (String, String) {
+    let mut result = format!("{}", var.id).to_string();
+    for x in &var.indexing {
+        match variable_to_value_map.get(x) {
+            Some(value) => {result = format!("{}[{}]", result, value).to_string();},
+            None => {println!("PANIC!!");}
+        }
+    }
+    let mut signal = "".to_string();
+    match &var.sub_variable {
+        Some(sub_var) => {
+            if sub_var.id.len() > 0 {
+                result = format!("{}.{}", result, signal);
+                signal = format!("{}", sub_var.id).to_string();
+                for x in &sub_var.indexing {
+                    match variable_to_value_map.get(x) {
+                        Some(value) => {signal = format!("{}[{}]", signal, value).to_string();},
+                        None => {println!("PANIC!!");}
+                    }
+                }
+            }
+        },
+        None => {println!("PANIC!!");}
+    };
+    (result, signal.to_string())
+}
+
+fn execute(single_command:&SingleCommand, variable_to_value_map: &mut HashMap<String, u32>, variable_to_component_map: &mut HashMap<String, Component>, template_map: &HashMap<String, Template>) {
     match single_command {
         SingleCommand::ForLoop(for_loop) => {
             println!("For loop {}",for_loop.index);
             let mut curr_value = for_loop.start_value;
             variable_to_value_map.insert(for_loop.index.clone(), for_loop.start_value.clone());
-            println!("Values {:?}", variable_to_value_map);
-            let mut condition = true;//evaluate(for_loop.condition.clone(), variable_to_value_map);
+            let mut condition = evaluate(for_loop.condition.clone(), variable_to_value_map);
             while condition {
-                // println!("Body {:?}", for_loop.body.clone());
-
                 for command in for_loop.body.clone() {
-                    execute(&command, variable_to_value_map);
+                    execute(&command, variable_to_value_map, variable_to_component_map, template_map);
                 }
                 curr_value = curr_value + for_loop.step as u32;
                 variable_to_value_map.insert(for_loop.index.clone(), curr_value);
                 condition = evaluate(for_loop.condition.clone(), variable_to_value_map);
+                if !condition {
+                    variable_to_value_map.remove(&for_loop.index);
+                }
             }
         },
         SingleCommand::Instruction(instruction) => {
-            println!("Executing instruction!");
+            if instruction.is_assignment {
+                let mut vars;
+                let operation;
+                let assignment_receiver;
+                match &instruction.assignment_expression {
+                    Some(exp) => {
+                        vars = exp.variables.clone(); 
+                        operation = exp.operation.clone(); 
+                        match &instruction.assignment_receiver {
+                            Some(var) => {
+                                assignment_receiver = var.clone();
+                                if operation == Operation::ComponentInstance {
+                                    let (a_r_id, s_id) = generate_string_from_variable(&assignment_receiver, variable_to_value_map);
+                                    let (temp_id, _) = generate_string_from_variable(&vars[0], variable_to_value_map);
+                                    let mut component = Component{
+                                        name: a_r_id.clone(),
+                                        template_to_use: temp_id,
+                                        size_per_dimension: vec![],
+                                        arguments: vec![]
+                                    };
+                                    variable_to_component_map.insert(a_r_id, component);
+                                }
+                            },
+                            None => {}
+                        };
+                    },
+                    None => {}
+                };
+            }
+            if instruction.is_constraint {
+                let mut constraint_receiver;
+                let mut vars : Vec<Variable> = vec![];
+                let operation: Operation;
+                match &instruction.constraint_expression {
+                    Some(exp) => {
+                        match &instruction.constraint_receiver {
+                            Some(var) => {
+                                constraint_receiver = var.clone();
+                                let (c_id, s_id) = generate_string_from_variable(&constraint_receiver, variable_to_value_map);
+                                let cc_id = c_id.replace(".","");
+                                match &constraint_receiver.sub_variable {
+                                    Some(signal_id) => {
+                                        match variable_to_component_map.get(&cc_id) {
+                                            Some(component) => {
+                                                match template_map.get(&component.template_to_use) {
+                                                    Some(template) => {
+                                                        println!("Template to use {:?}, signal {:?}", template.name, signal_id);
+                                                    },
+                                                    None => {
+                                                        println!("PANIC!");
+                                                    }
+                                                }
+                                            },
+                                            None => {}
+                                        };},
+                                    None => {println!("PANIC!");}
+                                };
+                            },
+                            None => {println!("PANIC!");}
+                        };
+                    },
+                None => {}};
+            }
+            // println!("Values {:?} - Components {:?}!", variable_to_value_map, variable_to_component_map);
         },
         SingleCommand::DeclarationStatement(decl_statement) => {
             println!("Executing declaration!");
@@ -1162,6 +1251,7 @@ fn main() -> std::io::Result<()> {
     println!("This is what I know about main compoment: {:?}", main_component);
 
     let mut variable_to_value_map : HashMap<String, u32> = HashMap::new();
+    let mut variable_to_component_map : HashMap<String, Component> = HashMap::new();
     let mut running = true;
 
     let mut actual_input_signal_vector : Vec<String> = vec![];
@@ -1199,9 +1289,9 @@ fn main() -> std::io::Result<()> {
                 }
                 
                 // declarations done
-                running= false;
+                running = false;
                 for command in &template.instructions {
-                    execute(&command, &mut variable_to_value_map);
+                    execute(&command, &mut variable_to_value_map, &mut variable_to_component_map, &template_map);
                 }
             },
             None => {
