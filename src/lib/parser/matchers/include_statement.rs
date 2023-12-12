@@ -7,7 +7,7 @@ pub fn process_include_path_string(include_path_string: & NonTerminalToken) -> &
         [
         Token::Terminal(TerminalToken{rule: Rule::FilesystemPath, content, ..})
         ] => content,
-        _ => panic!("Invalud IncludePathString AST Token")
+        _ => panic!("Invalid IncludePathString AST Token")
     }
 
 }

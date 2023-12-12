@@ -1,0 +1,21 @@
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+number = @{ ASCII_DIGIT+ }
+identifier = { ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
+array_declaration = {"[" ~ (expression) ~ "]"}
+complex_variable = {identifier ~ (array_declaration* ~ ("." ~ identifier ~ array_declaration*)?)}
+unary_op = { "-" | "!" | "~" }
+bitwise_op = { "&" | "|" | "^" }
+shift_op = { "<<" | ">>" }
+logical_op = { "&&" | "||" | "!=" | "==" }
+factor = { number | complex_variable | "(" ~ expression ~ ")" }
+unary_expr = { unary_op* ~ factor }
+shift_expr = { unary_expr ~ (shift_op ~ unary_expr)* } // Handling bitwise shifts
+bitwise_expr = { shift_expr ~ (bitwise_op ~ shift_expr)* } // Handling bitwise operations
+exponent = {bitwise_expr  ~ ( ("**") ~ bitwise_expr )* }
+term = { exponent ~ ( ("*" | "/") ~ exponent )* }
+arith_expr = { term ~ ( ("+" | "-") ~ term )* }
+logical_expr = { arith_expr ~ ( logical_op ~ arith_expr )* }
+ternary_expr = { logical_expr ~ ("?" ~ expression ~ ":" ~ expression)? }
+expression = _{ ternary_expr }
+assignment = { identifier ~ "=" ~ expression }
+statement = _{ assignment | expression }

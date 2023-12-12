@@ -35,15 +35,14 @@ template IsZero() {
 
 
 template IsEqual() {
-    signal input in1;
-    signal input in2;
+    signal input in[2];
     signal output out;
 
     component isz = IsZero();
 
-    in[1] - in[0] ==> isz.in;
+    isz.in <== in[1] - in[0] ;
 
-    isz.out ==> out;
+    out <== isz.out;
 }
 
 template ForceEqualIfEnabled() {

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use serde::Serialize;
+use std::process;
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Template{
@@ -22,6 +23,7 @@ struct Template{
     components: Vec<Component>,
     constraints: Vec<Expression>,
     instructions: Vec<SingleCommand>,
+    path: String,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -194,6 +196,8 @@ fn parse_array_declaration(array_decl_root: &Vec<Token>) -> String {
                 if let Token::Terminal(tt) = &subnntt.subrules[0] {
                     return tt.content.clone();
                 }
+            } else if let Token::Terminal(subtt) = &subntt.subrules[0] {
+                return subtt.content.clone();
             }
         }
     }
@@ -438,14 +442,15 @@ fn parse_compl_variable(container: &Token) -> Variable {
     compl_variable
 }
 
-fn parse_body_nested(elements: &Vec<Token>) -> Vec<SingleCommand> {
+fn parse_body_nested(elements: &Vec<Token>, path: &String, path_to_content_map: &HashMap<String, String>) -> Vec<SingleCommand> {
     let mut lines : Vec<SingleCommand> = vec![];
     for element in elements {
         if let Token::NonTerminal(ntt) = element {
             if (ntt.rule == Rule::ForStatement) {
-                lines.push(parse_for_loop(&ntt.subrules));
+                lines.push(parse_for_loop(&ntt.subrules, path, path_to_content_map));
             }
             if (ntt.rule == Rule::Expression) {
+                println!("Expression: origigi {}", extract_original_content_from_span(&path_to_content_map, ntt.span, path));
                 let mut index_split = 0;
                 let mut assignment_to_variable = false;
                 let mut is_constraint = false;
@@ -529,7 +534,7 @@ fn parse_body_nested(elements: &Vec<Token>) -> Vec<SingleCommand> {
     lines
 }
 
-fn parse_for_loop(elements: &Vec<Token>) -> SingleCommand {       
+fn parse_for_loop(elements: &Vec<Token>, path: &String, path_to_content_map: &HashMap<String, String>) -> SingleCommand {       
     let mut for_loop = ForLoop {
         index: "".to_string(),
         start_value: 0,
@@ -605,7 +610,7 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommand {
     }
     if let Token::NonTerminal(ntt) = &elements[4] {
         if ntt.rule == Rule::Body {
-            let parsed_body = parse_body_nested(&ntt.subrules);
+            let parsed_body = parse_body_nested(&ntt.subrules, path, path_to_content_map);
             for_loop.body = parsed_body;
         }
     }
@@ -613,7 +618,7 @@ fn parse_for_loop(elements: &Vec<Token>) -> SingleCommand {
     SingleCommand::ForLoop(for_loop)
 }
 
-fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
+fn parse_template_from_ast(template_root_token: &Vec<Token>, path: &String, path_to_content_map: &HashMap<String, String>) -> Template {
     let mut temp_name = String::from("");
     let mut template_param_vec : Vec<String> = vec![];
     let mut output_signals : Vec<Signal> = vec![];
@@ -678,7 +683,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                         }
                     }
                     if subsubtt.rule == Rule::ForStatement {
-                        let for_loop = parse_for_loop(&subsubtt.subrules);
+                        let for_loop = parse_for_loop(&subsubtt.subrules, path, path_to_content_map);
                         commands.push(for_loop);
                     }
                     if subsubtt.rule == Rule::Expression {
@@ -704,10 +709,11 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
                 } else if let Token::Terminal(subsubtt) = subsubtoken {
                 }
             }
+            commands.append(&mut parse_body_nested(&subtt.subrules, path, path_to_content_map));
         }
     }
     
-    let temp =  Template{
+    Template{
         name: temp_name,
         params: template_param_vec,
         private_input_signals: private_input_signals,
@@ -715,20 +721,20 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>) -> Template {
         intermediate_signals: intermediate_signals,
         components: components,
         constraints: constraints,
-        instructions: commands
-        };
-    temp
+        instructions: commands,
+        path: path.clone(),
+        }
 }
 
 // AST root level function
-fn find_templates(subrules:&Vec<Token>) -> (Option<Component>, Vec<Template>) {
+fn find_templates(subrules:&Vec<Token>, path: &String, path_to_content_map: &HashMap<String, String>) -> (Option<Component>, Vec<Template>) {
     let mut templates : Vec<Template> = Vec::new();
     let mut main_component = None;
 
     for token in subrules {
         if let Token::NonTerminal(ntt) = token {
             if ntt.rule == Rule::TemplateBlock {
-                let temp = parse_template_from_ast(&ntt.subrules); 
+                let temp = parse_template_from_ast(&ntt.subrules, path, path_to_content_map); 
                 templates.push(temp);
             }
             // this is probably main component definition
@@ -755,9 +761,9 @@ fn find_templates(subrules:&Vec<Token>) -> (Option<Component>, Vec<Template>) {
     (main_component, templates)
 }
 
-fn get_used_templates(template_map: &HashMap<String, Template>, start_node: Component) -> HashSet<Template> {
+fn get_used_templates(template_map: &HashMap<String, Template>, start_node: Component) -> HashMap<String, Template> {
     let mut queue: VecDeque<Component> = VecDeque::new();
-    let mut set = HashSet::<Template>::new();
+    let mut set = HashMap::<String, Template>::new();
 
     queue.push_back(start_node);
     while queue.len() > 0 {
@@ -765,7 +771,7 @@ fn get_used_templates(template_map: &HashMap<String, Template>, start_node: Comp
             Some(curr_component) => {
                 let current_template = curr_component.template_to_use;
                 if template_map.contains_key(&current_template) {
-                    set.insert(template_map[&current_template].clone());
+                    set.insert(current_template.clone(), template_map[&current_template].clone());
 
                     for component in &template_map[&current_template].components {
                         queue.push_back(component.clone());
@@ -1042,8 +1048,17 @@ fn get_actual_value_for_signals_components(csize_per_dimension: &Vec<String>, cn
                 total_count = total_count * size;
             },
             None => {
-                println!("PANIC!!! Argument {} not initialized!", dimension);
-                break;
+                match dimension.parse::<u32>() {
+                    Ok(size) => {
+                        limit_per_dimension.push(size.clone());
+                        total_count = total_count * size;
+                    },
+                    Err(e) => {
+                        println!("PANIC!!! Argument {} not initialized!", dimension);
+                        break;
+                    }
+                }
+
             }
         }
     }
@@ -1056,11 +1071,11 @@ fn evaluate(bool_exp: BoolExpression, variable_to_value_map:&mut HashMap<String,
     let mut rhs_value :u32 = 0;
     match variable_to_value_map.get(&bool_exp.lhs) {
         Some(lhs_v) => {lhs_value=lhs_v.clone()},
-        None => {println!("PANIC!!");}
+        None => {println!("PANIC!! 1072");}
     }
     match variable_to_value_map.get(&bool_exp.rhs) {
         Some(rhs_v) => {rhs_value=rhs_v.clone()},
-        None => {println!("PANIC!!");}
+        None => {println!("PANIC!! 1076");}
     }
     let operation = bool_exp.operation.trim();
     if operation.eq("<") {
@@ -1083,7 +1098,7 @@ fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut Has
     for x in &var.indexing {
         match variable_to_value_map.get(x) {
             Some(value) => {result = format!("{}[{}]", result, value).to_string();},
-            None => {println!("PANIC!!");}
+            None => {result = format!("{}[{}]", result, x).to_string();}
         }
     }
     let mut signal = "".to_string();
@@ -1100,12 +1115,13 @@ fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut Has
                 }
             }
         },
-        None => {println!("PANIC!!");}
+        None => {println!("PANIC!! 1116");}
     };
     (result, signal.to_string())
 }
 
 fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMap<String, Template>) {
+    // println!("~ {:?}", single_command);
     match single_command {
         SingleCommand::ForLoop(for_loop) => {
             // println!("For loop {}",for_loop.index);
@@ -1140,21 +1156,27 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                                 if operation == Operation::ComponentInstance {
                                     let (a_r_id, s_id) = generate_string_from_variable(&assignment_receiver, &mut heap.variable_to_value_map);
                                     let (temp_id, _) = generate_string_from_variable(&vars[0], &mut heap.variable_to_value_map);
-                                    let mut component = Component{
-                                        name: a_r_id.clone(),
-                                        template_to_use: temp_id,
-                                        size_per_dimension: vec![],
-                                        arguments: vec![],
+                                    match template_map.get(&temp_id) {
+                                        Some(templ) => {
+                                            // println!("Instantiate {:?}", templ);
+                                            let mut component = Component{
+                                                name: a_r_id.clone(),
+                                                template_to_use: temp_id,
+                                                size_per_dimension: vec![],
+                                                arguments: vec![],
+                                            };
+                                            heap.variable_to_component_map.insert(a_r_id.clone(), component.clone());
+                                            heap.variable_to_heap_map.insert(a_r_id, Heap{
+                                                current_component: component,
+                                                variable_set: HashSet::new(),
+                                                component_set: HashSet::new(),
+                                                variable_to_value_map: HashMap::new(),
+                                                variable_to_component_map: HashMap::new(),
+                                                variable_to_heap_map : HashMap::new(),
+                                            });
+                                        },
+                                        None => {}
                                     };
-                                    heap.variable_to_component_map.insert(a_r_id.clone(), component.clone());
-                                    heap.variable_to_heap_map.insert(a_r_id, Heap{
-                                        current_component: component,
-                                        variable_set: HashSet::new(),
-                                        component_set: HashSet::new(),
-                                        variable_to_value_map: HashMap::new(),
-                                        variable_to_component_map: HashMap::new(),
-                                        variable_to_heap_map : HashMap::new(),
-                                    });
                                 }
                             },
                             None => {}
@@ -1167,6 +1189,7 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                 let mut constraint_receiver;
                 let mut vars : Vec<Variable> = vec![];
                 let operation: Operation;
+
                 match &instruction.constraint_expression {
                     Some(exp) => {
                         let val = get_value_for_evaluation(exp.clone(), heap);
@@ -1185,28 +1208,52 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                                                         match heap.variable_to_heap_map.get_mut(&component.name) {
                                                             Some(sub_heap) => {
                                                                 sub_heap.variable_set.insert(s_id.clone());
-                                                                match heap.variable_to_value_map.get(&s_id) {
-                                                                    Some(value) => {
-                                                                        sub_heap.variable_to_value_map.insert(s_id.clone(), val.clone());
-                                                                    },
-                                                                    None => {}
+                                                                // println!("Component to use:{} signal _id: {:?}, val: {:?}", component.name, s_id, val);
+                                                                // println!("+=============");
+                                                                sub_heap.variable_to_value_map.insert(s_id.clone(), val.clone());
+                                                                // println!("sub_heap: {:?}", sub_heap);
+                                                                // println!("Component {:?}", component);
+                                                                
+                                                                let mut actual_input_signal_vector = vec![];
+                                                                for signal in &template.private_input_signals {
+                                                                    actual_input_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &heap.variable_to_value_map));
                                                                 };
+                                                                let mut missing_signal = false;
+                                                                for signal in actual_input_signal_vector {
+                                                                    match sub_heap.variable_to_value_map.get(&signal) {
+                                                                        Some (signal_value) => {},
+                                                                        None => {missing_signal = true; break; }
+                                                                    }
+                                                                }
+                                                                if !missing_signal {
+                                                                    execute_component(&component, sub_heap, template_map);
+                                                                }
+                                                                
                                                             },
-                                                            None => {}
+                                                            None => {println!("PANIC! 1232");}
                                                         };
                                                         // println!("Template to use {:?}, signal {:?}", template.name, signal_id);
                                                     },
                                                     None => {
-                                                        println!("PANIC!");
+                                                        println!("PANIC! 1237");
                                                     }
                                                 }
                                             },
-                                            None => {}
+                                            None => {
+                                                if (cc_id == "inv".to_string() || cc_id == "out".to_string()) {
+                                                    println!("{:?}", instruction.constraint_expression);
+                                                    heap.variable_to_value_map.insert(cc_id.clone(), val);
+                                                }
+                                                // println!("{:?}", instruction);
+                                                println!("{:?}", heap);
+                                                process::exit(1);
+                                                // println!("PANIC! 1241, looking for {:?} failed {:?}", cc_id, heap);
+                                            }
                                         };},
-                                    None => {println!("PANIC!");}
+                                    None => {println!("PANIC! 1243");}
                                 };
                             },
-                            None => {println!("PANIC!");}
+                            None => {println!("PANIC! 1246");}
                         };
                     },
                 None => {}};
@@ -1225,13 +1272,46 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
 
             } else {
                 let component_vector = get_actual_value_for_signals_components(&decl_statement.size_per_dimension, &decl_statement.name, &mut heap.variable_to_value_map);
-                for component in component_vector{
-                    heap.component_set.insert(component);
+                for component in &component_vector{
+                    heap.component_set.insert(component.clone());
+                }
+                if component_vector.len() == 1 {
+                    // println!("decl_statement {:?}", decl_statement);
+                    let tmp_component = Component{
+                        name: component_vector[0].clone(),
+                        template_to_use: decl_statement.template_to_use.clone(),
+                        size_per_dimension: vec![],
+                        arguments: vec![],
+                    };
+                    heap.variable_to_component_map.insert(component_vector[0].clone(), tmp_component.clone());
+                    heap.variable_to_heap_map.insert(component_vector[0].clone(), Heap{
+                        current_component: tmp_component,
+                        variable_set: HashSet::new(),
+                        component_set: HashSet::new(),
+                        variable_to_value_map: HashMap::new(),
+                        variable_to_component_map: HashMap::new(),
+                        variable_to_heap_map : HashMap::new(),
+                    });
                 }
             }
         },
     }
 
+}
+
+fn execute_component(component: &Component, heap: &mut Heap, template_map: &HashMap<String, Template>) {
+    match template_map.get(&component.template_to_use) {
+        Some(template) => {
+            // println!("Executing component {:?} with {} commands", component.name, template.instructions.len());
+            for command in &template.instructions {
+                // println!("Executing command {:?}", command);
+                execute(&command, heap, &template_map);
+            }
+        },
+        None => {}
+    }
+    // println!("Finished component {:?}, heap: {:?}", component, heap);
+    // process::exit(1);
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -1244,6 +1324,18 @@ struct Heap{
     variable_to_heap_map: HashMap<String, Heap>,
 }
 
+fn extract_original_content_from_span(path_to_content_map: &HashMap<String, String>, span: (usize, usize), file_path: &String) -> String {
+    let mut result = String::from("");
+
+    match path_to_content_map.get(file_path) {
+        Some(content) => {
+            result = (&content[span.0..span.1]).to_string();
+        }
+        None => {}
+    }
+    result
+ }
+
 fn main() -> std::io::Result<()> {
     let mut template_map: HashMap<String, Template> = HashMap::new();
     let mut main_component: Component = Component{
@@ -1252,7 +1344,7 @@ fn main() -> std::io::Result<()> {
         size_per_dimension: vec![],
         arguments: vec![],
     };
-
+    let mut path_to_content_map = HashMap::<String, String>::new();
     let path = std::fs::canonicalize("./src/lib/parser/sample_circuits/warships_raw.circom").expect("Invalid Path");
 
     let ctx = compile::build_context(&path);
@@ -1261,15 +1353,19 @@ fn main() -> std::io::Result<()> {
     
 
     for (path, source_file) in ctx.files {
-        if !path.clone().into_os_string().into_string().unwrap().contains("warships_raw") {
+        let path_as_string = path.clone().into_os_string().into_string().unwrap();
+        if !path_as_string.contains("warships_raw") {
             // continue;
         }
-        // println!("{:?}", path);
+        let content = fs::read_to_string(&path_as_string).expect("Failed to read file");
+        
+        path_to_content_map.insert(path_as_string.clone(), content);
+        // println!("{:?}", path_as_string);
         if let libsnarkrs::parser::compile::LoadAttempt::Loaded(file) = source_file {
             // write!(output_file, "{:?}", file.root.ast);
             if let libsnarkrs::parser::ast::tokens::Token::NonTerminal(token) = &file.root.ast[0] {
                 // println!("{:?}", token.rule);
-                let (main_component_tmp, templates) = find_templates(&token.subrules);
+                let (main_component_tmp, templates) = find_templates(&token.subrules, &path_as_string, &path_to_content_map);
                 match main_component_tmp {
                     Some(component) => {
                         main_component = component;
@@ -1376,6 +1472,7 @@ fn main() -> std::io::Result<()> {
                 for command in &template.instructions {
                     execute(&command, &mut heap, &template_map);
                 }
+                println!("{:?}", heap.variable_to_value_map);
             },
             None => {
                 running = false;
