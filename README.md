@@ -1,3 +1,3 @@
 # Short circuit
 
-Amazing new things for Circom
+Still in stealth mode
