@@ -7,6 +7,7 @@ use std::io::Write;
 use libsnarkrs::parser::compile;
 use libsnarkrs::parser::ast::tokens::Token;
 use libsnarkrs::parser::ast::Rule;
+use libsnarkrs::parser::expression_parser;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -450,7 +451,7 @@ fn parse_body_nested(elements: &Vec<Token>, path: &String, path_to_content_map: 
                 lines.push(parse_for_loop(&ntt.subrules, path, path_to_content_map));
             }
             if (ntt.rule == Rule::Expression) {
-                println!("Expression: origigi {}", extract_original_content_from_span(&path_to_content_map, ntt.span, path));
+                extract_original_content_from_span(&path_to_content_map, ntt.span, path);
                 let mut index_split = 0;
                 let mut assignment_to_variable = false;
                 let mut is_constraint = false;
@@ -1325,15 +1326,22 @@ struct Heap{
 }
 
 fn extract_original_content_from_span(path_to_content_map: &HashMap<String, String>, span: (usize, usize), file_path: &String) -> String {
-    let mut result = String::from("");
+    let mut result = "";
 
     match path_to_content_map.get(file_path) {
         Some(content) => {
-            result = (&content[span.0..span.1]).to_string();
+            result = &content[span.0..span.1];
         }
         None => {}
     }
-    result
+
+    let do_parse = true;
+    if do_parse {
+        let res = expression_parser::parse_statement(result);
+        // println!("Parsing expression result {:?}", res);
+    }
+
+    result.to_string()
  }
 
 fn main() -> std::io::Result<()> {

@@ -4,9 +4,6 @@ use pest::Parser;
 #[grammar = "lib/parser/grammar.pest"]
 struct CircuitParser;
 
-#[derive(Parser)]
-#[grammar = "lib/parser/expression_grammar.pest"]
-struct ExpressionParser;
 
 pub mod tokens {
 
@@ -153,10 +150,6 @@ pub fn parse_file(path: & std::path::PathBuf) -> Result<File, ParseError> {
         },
         includes: Vec::new()
     })
-
-}
-
-pub fn parse_expression(content: & str) -> Result<Expression, ParseError> {
 
 }
 
