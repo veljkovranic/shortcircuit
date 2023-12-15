@@ -1,5 +1,6 @@
 extern crate libsnarkrs;
 extern crate serde;
+extern crate backtrace;
 
 use std::fs;
 use std::fs::File;
@@ -13,6 +14,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use serde::Serialize;
 use std::process;
+use backtrace::Backtrace;
+use expression_parser::*;
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Template{
@@ -46,7 +49,7 @@ struct Signal {
     name: String,
     direction: SignalDirection,
     size_per_dimension: Vec<String>,
-    expression: Expression,
+    expression: Stmt,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -64,18 +67,13 @@ struct DeclStatement {
     direction: SignalDirection,
     size_per_dimension: Vec<String>,
     template_to_use: String,
-    expression: Expression,
+    expression: Stmt,
     arguments: Vec<u32>,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Expression {
     content: String,
-    value: String,
-    numerical_value: u32,
-    variables: Vec<String>,
-    contains_constraints: bool,
-    is_left_constraint: bool
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -127,12 +125,7 @@ enum Operation {
 //Make this be enum
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Instruction {
-    is_constraint: bool,
-    is_assignment: bool,
-    constraint_receiver: Option<Variable>,
-    constraint_expression: Option<Evaluation>,
-    assignment_receiver: Option<Variable>,
-    assignment_expression: Option<Evaluation>,
+    statement: expression_parser::Stmt
 }
 
 fn get_value_for_evaluation(eval: Evaluation, heap: &mut Heap) -> u32 {
@@ -154,39 +147,19 @@ fn get_value_for_evaluation(eval: Evaluation, heap: &mut Heap) -> u32 {
 
 fn parse_expression(expression: &Token) -> Expression {
     let mut result = "".to_string();
-    let mut value = "".to_string();
-    let mut deps : Vec<String> = vec![];
-    let mut contains_constraints = false;
-    let mut is_left_constraint = false;
-    let numerical_value = 0;
+
     match expression {
         Token::NonTerminal(ntt) => {
             for token in &ntt.subrules {
-                let mut tmp_exp = parse_expression(token);
-                result = format!("{}{}", result, tmp_exp.content);
-                deps.append(&mut tmp_exp.variables);
-                contains_constraints = contains_constraints || tmp_exp.contains_constraints;
-                is_left_constraint = is_left_constraint || tmp_exp.is_left_constraint;
+                result = format!("{}{}", result, parse_expression(token).content);
             }
         }
         Token::Terminal(tt) => {
-            if tt.rule == Rule::E_VariableName {
-                deps.push(tt.content.clone());
-            }
-            
-            contains_constraints = tt.rule == Rule::E_2_SignalLeftHandOperator || tt.rule == Rule::E_3_SignalRightHandOperator;
-            is_left_constraint = tt.rule == Rule::E_2_SignalLeftHandOperator;
-            
             result = format!("{}{}", result, tt.content.clone());
         }
     }
     Expression{
-        numerical_value: numerical_value,
-        value: value,
-        content: result,
-        variables: deps,
-        contains_constraints: contains_constraints,
-        is_left_constraint: is_left_constraint
+        content: result
     }
 }
 
@@ -220,34 +193,13 @@ fn parse_list_of_vars_or_values(argument_decl_root: &Vec<Token>, index: usize) -
     temp
 }
 
-fn compute_value_of_expression(expression_root: &Vec<Token>) -> u32 {
-    let mut result : u32 = 0; 
-    if let Token::NonTerminal(ntt) = &expression_root[0] {
-        if ntt.rule == Rule::E_Value {
-            if let Token::Terminal(tt) = &ntt.subrules[0] {
-                if tt.rule == Rule::E_Decimal {
-                    result = tt.content.parse::<u32>().unwrap();
-                }
-            }
-        }
-    }
-    result
-}
-
-fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclStatement {
+fn parse_declaration_statement(declaration_statement_root: &Vec<Token>, path: &String, path_to_content_map: &HashMap<String, String>) -> DeclStatement {
     let mut name = "".to_string();
     let mut decl_type = DeclType::Variable;
     let mut direction = SignalDirection::Input;
     let mut size_per_dimension = vec![];
     let mut template_to_use = "".to_string();
-    let mut expression = Expression{
-        value: "".to_string(),
-        content: "".to_string(),
-        variables: vec![],
-        contains_constraints: false,
-        is_left_constraint: false,
-        numerical_value: 0,
-    };
+    let mut expression = expression_parser::Stmt::Empty;
     let mut arguments = vec![];
 
     if let Token::NonTerminal(ntt) = &declaration_statement_root[0] {
@@ -284,7 +236,9 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
                 if let Token::NonTerminal(subsubtt) = &ntt.subrules[ntt.subrules.len() - 1] {
                     if subsubtt.rule == Rule::Expression {
                         // println!("{:?}", subsubtt.subrules);
-                        expression = parse_expression(&ntt.subrules[ntt.subrules.len() - 1]);
+                        let old_expression = parse_expression(&ntt.subrules[ntt.subrules.len() - 1]);
+                        expression = extract_original_content_from_span(&path_to_content_map, subsubtt.span, path);
+                        // println!("PARPRPAPRAR  {:?}", expression);
                     }
                 } 
             }
@@ -353,7 +307,7 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>) -> DeclS
             if declaration_statement_root.len() > 2 {
                 // println!("decl {:?}", declaration_statement_root);
                 if let Token::NonTerminal(subntt) = &declaration_statement_root[2] {
-                    expression.numerical_value = compute_value_of_expression(&subntt.subrules);
+                    let exp = extract_original_content_from_span(&path_to_content_map, subntt.span, path);
                 }
             }
 
@@ -451,84 +405,9 @@ fn parse_body_nested(elements: &Vec<Token>, path: &String, path_to_content_map: 
                 lines.push(parse_for_loop(&ntt.subrules, path, path_to_content_map));
             }
             if (ntt.rule == Rule::Expression) {
-                extract_original_content_from_span(&path_to_content_map, ntt.span, path);
-                let mut index_split = 0;
-                let mut assignment_to_variable = false;
-                let mut is_constraint = false;
-                let mut left_constraint = false;
-                for op_index in 0..ntt.subrules.len() {
-                    if let Token::Terminal(tt) = &ntt.subrules[op_index] {
-                        if tt.rule == Rule::E_4_AssignmentOperator || tt.rule == Rule::E_2_SignalLeftHandOperator || tt.rule == Rule::E_3_SignalRightHandOperator {
-                            index_split = op_index;
-                            match tt.rule {
-                                Rule::E_4_AssignmentOperator => {
-                                    assignment_to_variable = true;
-                                },
-                                Rule::E_2_SignalLeftHandOperator => {
-                                    is_constraint = true;
-                                    left_constraint = true;
-                                },
-                                Rule::E_3_SignalRightHandOperator => {
-                                    is_constraint = true;
-                                    left_constraint = false;
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                let lhs = parse_compl_variable(&ntt.subrules[0]);
-                let mut operation = Operation::Id;
-                let mut contains_operation : bool = false;
-                let mut contains_math_operation : bool = false;
-                let mult_sign = String::from("*");
-                let mut vars = vec![];
-                for op_index in index_split+1..ntt.subrules.len() {
-                    if let Token::Terminal(tt) = &ntt.subrules[op_index] {
-                        if tt.content.eq(&mult_sign) {
-                            contains_math_operation = true;
-                            operation = Operation::Multiply;
-                        }
-                        if tt.rule == Rule::E_20_BracedOperatorOpen {
-                            contains_operation = true;
-                            operation = Operation::ComponentInstance;
-                        }
-                    } else if let Token::NonTerminal(nntt) = &ntt.subrules[op_index]{
-                        vars.push(parse_compl_variable(&ntt.subrules[op_index]));
-                    }
-                }
-
-                let mut assignment_receiver = None;
-                let mut assignment_expression = None;
-                let mut constraint_receiver = None;
-                let mut constraint_expression = None;
-                if is_constraint {
-                    if left_constraint {
-                        constraint_receiver  = Some(lhs);
-                        constraint_expression = Some(Evaluation{
-                            variables: vars.clone(),
-                            operation: operation,
-                            params: vec![]
-                        });
-                    }
-                } else {
-                    assignment_receiver = Some(lhs);
-                    assignment_expression = Some(Evaluation{
-                        variables: vars.clone(),
-                        operation: operation,
-                        params: vec![]
-                    });
-                }
-                lines.push(SingleCommand::Instruction(Instruction{
-                    is_constraint: is_constraint,
-                    is_assignment: assignment_to_variable,
-                    assignment_receiver: assignment_receiver,
-                    assignment_expression: assignment_expression,
-                    constraint_receiver: constraint_receiver,
-                    constraint_expression: constraint_expression
-                }));
-                // println!("Varsss {:?}", lhs);
-                // println!("What is it: assignment {}, constraint {}, left constraint {}", assignment_to_variable, is_constraint, left_constraint);
+                let statement = extract_original_content_from_span(&path_to_content_map, ntt.span, path);
+                // println!("Parsed instruction {:?}", statement);
+                lines.push(SingleCommand::Instruction(Instruction{statement:statement}));
             }
         }
     }
@@ -550,9 +429,9 @@ fn parse_for_loop(elements: &Vec<Token>, path: &String, path_to_content_map: &Ha
     // for (___;  ; ) 
     if let Token::NonTerminal(ntt) = &elements[1] {
         if ntt.rule == Rule::DeclarationStatement {
-            let statement = parse_declaration_statement(&ntt.subrules);
+            let statement = parse_declaration_statement(&ntt.subrules, path, path_to_content_map);
             for_loop.index = statement.name.clone();
-            for_loop.start_value = statement.expression.numerical_value.clone();
+            for_loop.start_value = 0;
         }
     } 
     // for (;___; ) 
@@ -615,7 +494,7 @@ fn parse_for_loop(elements: &Vec<Token>, path: &String, path_to_content_map: &Ha
             for_loop.body = parsed_body;
         }
     }
-
+    // println!("Parsed body of for loop: {:?}", for_loop.body);
     SingleCommand::ForLoop(for_loop)
 }
 
@@ -648,7 +527,7 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>, path: &String, path
             for subsubtoken in &subtt.subrules {
                 if let Token::NonTerminal(subsubtt) = subsubtoken {
                     if subsubtt.rule == Rule::DeclarationStatement {
-                        let statement = parse_declaration_statement(&subsubtt.subrules);
+                        let statement = parse_declaration_statement(&subsubtt.subrules, path, path_to_content_map);
                         commands.push(SingleCommand::DeclarationStatement(statement.clone()));
                         if statement.decl_type == DeclType::Signal {
                             if statement.direction == SignalDirection::Output {
@@ -688,29 +567,14 @@ fn parse_template_from_ast(template_root_token: &Vec<Token>, path: &String, path
                         commands.push(for_loop);
                     }
                     if subsubtt.rule == Rule::Expression {
-                        // println!("Found {:?}", subsubtt.subrules);
-                        let mut expression = parse_expression(subsubtoken);
-                        if expression.contains_constraints {
-                            if expression.is_left_constraint { 
-                                expression.value = expression.variables[0].clone();
-                             } else {
-                                expression.value = expression.variables[expression.variables.len() - 1].clone();
-                             }
-                        }
-
-                        let index = match expression.variables.iter().position(|x| *x == expression.value) { Some(index) => { expression.variables.remove(index);}, None => {}};
-                        let index = match expression.variables.iter().position(|x| *x == "in".to_string()) { Some(index) => { expression.variables.remove(index);}, None => {}};
-                        let index = match expression.variables.iter().position(|x| *x == "out".to_string()) { Some(index) => { expression.variables.remove(index);}, None => {}};
-                        constraints.push(expression);
-                        // commands.push(SingleCommand::Instruction{
-                           
-                        // })
-                        // println!("Exp {:?}", expression);
+                        let mut statement = extract_original_content_from_span(&path_to_content_map, subsubtt.span, path);
+                        commands.push(SingleCommand::Instruction(Instruction{
+                            statement: statement.clone()
+                        }));
                     }
                 } else if let Token::Terminal(subsubtt) = subsubtoken {
                 }
             }
-            commands.append(&mut parse_body_nested(&subtt.subrules, path, path_to_content_map));
         }
     }
     
@@ -740,7 +604,7 @@ fn find_templates(subrules:&Vec<Token>, path: &String, path_to_content_map: &Has
             }
             // this is probably main component definition
             if ntt.rule == Rule::DeclarationStatement {
-                let decl_statement = parse_declaration_statement(&ntt.subrules);
+                let decl_statement = parse_declaration_statement(&ntt.subrules, path, path_to_content_map);
                 // println!("Parsed declaration statement {:?}", decl_statement);
                 if decl_statement.decl_type == DeclType::Component{
                     if decl_statement.name.eq(&String::from("main")) {
@@ -853,28 +717,28 @@ fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Compone
                     group: main_template.name.clone()
                 });
                 curr_y += 50;
-                components.push(OutputFormat{
-                    category: "temp".to_string(),
-                    key: i_signal.expression.content.clone(),
-                    loc: format!("{}  {}", curr_x, curr_y),
-                    isGroup: false,
-                    group: main_template.name.clone()
-                });
+                // components.push(OutputFormat{
+                //     category: "temp".to_string(),
+                //     key: i_signal.expression.content.clone(),
+                //     loc: format!("{}  {}", curr_x, curr_y),
+                //     isGroup: false,
+                //     group: main_template.name.clone()
+                // });
 
-                for dependency in &i_signal.expression.variables {
-                    links.push(Link{
-                        from: dependency.clone(),
-                        fromPort: "out".to_string(),
-                        to: i_signal.expression.content.clone(),
-                        toPort: "in1".to_string()
-                    });
-                }
-                links.push(Link{
-                    from: i_signal.expression.content.clone(),
-                    fromPort: "out".to_string(),
-                    to: i_signal.name.clone(),
-                    toPort: "in1".to_string()
-                });
+                // for dependency in &i_signal.expression.variables {
+                //     links.push(Link{
+                //         from: dependency.clone(),
+                //         fromPort: "out".to_string(),
+                //         to: i_signal.expression.content.clone(),
+                //         toPort: "in1".to_string()
+                //     });
+                // }
+                // links.push(Link{
+                //     from: i_signal.expression.content.clone(),
+                //     fromPort: "out".to_string(),
+                //     to: i_signal.name.clone(),
+                //     toPort: "in1".to_string()
+                // });
                 curr_y += 20;
             }
 
@@ -887,33 +751,33 @@ fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Compone
             });
 
             curr_x += 50;
-            for constraint in &main_template.constraints {
-                components.push(OutputFormat{
-                    category: "temp".to_string(),
-                    key: constraint.content.clone(),
-                    loc: format!("{}  {}", curr_x, curr_y),
-                    isGroup: false,
-                    group: main_template.name.clone()
-                });
-                curr_y += 20;
+            // for constraint in &main_template.constraints {
+            //     components.push(OutputFormat{
+            //         category: "temp".to_string(),
+            //         key: constraint.content.clone(),
+            //         loc: format!("{}  {}", curr_x, curr_y),
+            //         isGroup: false,
+            //         group: main_template.name.clone()
+            //     });
+            //     curr_y += 20;
 
-                for dependency in &constraint.variables {
-                    links.push(Link{
-                        from: dependency.clone(),
-                        fromPort: "out".to_string(),
-                        to: constraint.content.clone(),
-                        toPort: "in".to_string()
-                    });
-                }
-                links.push(Link{
-                    from: constraint.content.clone(),
-                    fromPort: "out".to_string(),
-                    to: constraint.value.clone(),
-                    toPort: "in".to_string()
-                });
-                curr_y += 50;
+            //     for dependency in &constraint.variables {
+            //         links.push(Link{
+            //             from: dependency.clone(),
+            //             fromPort: "out".to_string(),
+            //             to: constraint.content.clone(),
+            //             toPort: "in".to_string()
+            //         });
+            //     }
+            //     links.push(Link{
+            //         from: constraint.content.clone(),
+            //         fromPort: "out".to_string(),
+            //         to: constraint.content.clone(),
+            //         toPort: "in".to_string()
+            //     });
+            //     curr_y += 50;
                 
-            }
+            // }
             curr_x += 50;
             for o_signal in &main_template.output_signals {
                 components.push(OutputFormat{
@@ -1122,7 +986,7 @@ fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut Has
 }
 
 fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMap<String, Template>) {
-    // println!("~ {:?}", single_command);
+    println!("~ {:?}", single_command);
     match single_command {
         SingleCommand::ForLoop(for_loop) => {
             // println!("For loop {}",for_loop.index);
@@ -1143,131 +1007,94 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
             }
         },
         SingleCommand::Instruction(instruction) => {
-            if instruction.is_assignment {
-                let mut vars;
-                let operation;
-                let assignment_receiver;
-                match &instruction.assignment_expression {
-                    Some(exp) => {
-                        vars = exp.variables.clone(); 
-                        operation = exp.operation.clone(); 
-                        match &instruction.assignment_receiver {
-                            Some(var) => {
-                                assignment_receiver = var.clone();
-                                if operation == Operation::ComponentInstance {
-                                    let (a_r_id, s_id) = generate_string_from_variable(&assignment_receiver, &mut heap.variable_to_value_map);
-                                    let (temp_id, _) = generate_string_from_variable(&vars[0], &mut heap.variable_to_value_map);
-                                    match template_map.get(&temp_id) {
-                                        Some(templ) => {
-                                            // println!("Instantiate {:?}", templ);
-                                            let mut component = Component{
-                                                name: a_r_id.clone(),
-                                                template_to_use: temp_id,
+           match &instruction.statement {
+                Stmt::Assign(assign) => {
+                    match assign.assign_op {
+                        Operator::Assignment => {
+                            let evaluated_target = expression_parser::evaluate(&Expr::ComplexVariable(assign.target.clone()), &mut heap.variable_to_value_map);
+                            let evaluated_value = expression_parser::evaluate(&assign.value, &mut heap.variable_to_value_map);
+                            // println!("Executing evaluated_target {:?}", evaluated_target);
+                            // println!("Executing evaluated_value {:?}", evaluated_value);
+                            match evaluated_target {
+                                EvaluationResult::Identifier(iden) => {
+                                    match evaluated_value {
+                                        EvaluationResult::ComponentInstance(component_instance) => {
+                                            let tmp_comp = Component{
+                                                name: iden.clone(),
+                                                template_to_use: component_instance.name.clone(),
                                                 size_per_dimension: vec![],
-                                                arguments: vec![],
+                                                arguments: component_instance.parameter_list.clone(),
                                             };
-                                            heap.variable_to_component_map.insert(a_r_id.clone(), component.clone());
-                                            heap.variable_to_heap_map.insert(a_r_id, Heap{
-                                                current_component: component,
-                                                variable_set: HashSet::new(),
-                                                component_set: HashSet::new(),
-                                                variable_to_value_map: HashMap::new(),
-                                                variable_to_component_map: HashMap::new(),
-                                                variable_to_heap_map : HashMap::new(),
-                                            });
+                                            heap.variable_to_component_map.insert(iden, tmp_comp);
                                         },
-                                        None => {}
-                                    };
-                                }
-                            },
-                            None => {}
-                        };
-                    },
-                    None => {}
-                };
-            }
-            if instruction.is_constraint {
-                let mut constraint_receiver;
-                let mut vars : Vec<Variable> = vec![];
-                let operation: Operation;
+                                        EvaluationResult::Value(num) => {
+                                            heap.variable_to_value_map.insert(iden, num);
+                                        },
+                                        _ => {}
+                                    }
+                                },
+                                _ => {}
+                            }
+                        },
+                        _ => {}
+                    }
+                
+                }, 
+                Stmt::Constraint(constraint) => {
+                    let evaluated_target = expression_parser::evaluate(&Expr::ComplexVariable(constraint.target.clone()), &mut heap.variable_to_value_map);
+                    let evaluated_value = expression_parser::evaluate(&constraint.value, &mut heap.variable_to_value_map);
+                    // println!("Executing evaluated_target {:?}", evaluated_target);
+                    // println!("Executing evaluated_value {:?}", evaluated_value);
+                    match evaluated_target {
+                        EvaluationResult::Identifier(iden) => {
+                            match evaluated_value {
+                                EvaluationResult::Value(num) => {
+                                    heap.variable_to_value_map.insert(iden, num);
+                                },
+                                _ => {}
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                // Stmt::ConditionalAssign(cond_assign) => {
+                //     println!("Executing cond_assign {:?}", cond_assign);
+                // }, 
+                // Stmt::Constraint(constraint) => {
+                //     println!("Executing constraint {:?}", constraint);
+                // },
+                Stmt::RegularExpr(expr) => {
+                    expression_parser::evaluate(expr, &mut heap.variable_to_value_map);
+                    println!("Executing expr {:?}", expr);
+                }, 
+                // Stmt::Assert(assert) => {
+                //     println!("Executing assert {:?}", assert);
+                // }, 
+                _ => {
 
-                match &instruction.constraint_expression {
-                    Some(exp) => {
-                        let val = get_value_for_evaluation(exp.clone(), heap);
-                        match &instruction.constraint_receiver {
-                            Some(var) => {
-                                constraint_receiver = var.clone();
-                                let (c_id, s_id) = generate_string_from_variable(&constraint_receiver, &mut heap.variable_to_value_map);
-                                // println!("Component {:?}, signal {:?}", c_id, s_id);
-                                let cc_id = c_id.replace(".","");
-                                match &constraint_receiver.sub_variable {
-                                    Some(signal_id) => {
-                                        match heap.variable_to_component_map.get(&cc_id) {
-                                            Some(component) => {
-                                                match template_map.get(&component.template_to_use) {
-                                                    Some(template) => {
-                                                        match heap.variable_to_heap_map.get_mut(&component.name) {
-                                                            Some(sub_heap) => {
-                                                                sub_heap.variable_set.insert(s_id.clone());
-                                                                // println!("Component to use:{} signal _id: {:?}, val: {:?}", component.name, s_id, val);
-                                                                // println!("+=============");
-                                                                sub_heap.variable_to_value_map.insert(s_id.clone(), val.clone());
-                                                                // println!("sub_heap: {:?}", sub_heap);
-                                                                // println!("Component {:?}", component);
-                                                                
-                                                                let mut actual_input_signal_vector = vec![];
-                                                                for signal in &template.private_input_signals {
-                                                                    actual_input_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &heap.variable_to_value_map));
-                                                                };
-                                                                let mut missing_signal = false;
-                                                                for signal in actual_input_signal_vector {
-                                                                    match sub_heap.variable_to_value_map.get(&signal) {
-                                                                        Some (signal_value) => {},
-                                                                        None => {missing_signal = true; break; }
-                                                                    }
-                                                                }
-                                                                if !missing_signal {
-                                                                    execute_component(&component, sub_heap, template_map);
-                                                                }
-                                                                
-                                                            },
-                                                            None => {println!("PANIC! 1232");}
-                                                        };
-                                                        // println!("Template to use {:?}, signal {:?}", template.name, signal_id);
-                                                    },
-                                                    None => {
-                                                        println!("PANIC! 1237");
-                                                    }
-                                                }
-                                            },
-                                            None => {
-                                                if (cc_id == "inv".to_string() || cc_id == "out".to_string()) {
-                                                    println!("{:?}", instruction.constraint_expression);
-                                                    heap.variable_to_value_map.insert(cc_id.clone(), val);
-                                                }
-                                                // println!("{:?}", instruction);
-                                                println!("{:?}", heap);
-                                                process::exit(1);
-                                                // println!("PANIC! 1241, looking for {:?} failed {:?}", cc_id, heap);
-                                            }
-                                        };},
-                                    None => {println!("PANIC! 1243");}
-                                };
-                            },
-                            None => {println!("PANIC! 1246");}
-                        };
-                    },
-                None => {}};
+                }
             }
-            // println!("Values {:?} - Components {:?}!", heap.variable_to_value_map, heap.variable_to_component_map);
         },
         SingleCommand::DeclarationStatement(decl_statement) => {
             if decl_statement.decl_type == DeclType::Signal || decl_statement.decl_type == DeclType::Variable {
                 let signal_vector = get_actual_value_for_signals_components(&decl_statement.size_per_dimension, &decl_statement.name, &mut heap.variable_to_value_map);
                 for signal in signal_vector{
                     heap.variable_set.insert(signal.clone());
+                    match &decl_statement.expression {
+                        Stmt::RegularExpr(expr) => {
+                            let val = expression_parser::evaluate(&expr, &mut heap.variable_to_value_map);
+                            println!("Valuelue {:?}", val);
+                            match val {
+                                EvaluationResult::Value(number) => {
+                                    heap.variable_to_value_map.insert(signal.clone(), number.clone());
+                                },
+                                _ => {}
+                            }
+                        },
+                        _ => {}
+                    }
                     if decl_statement.decl_type == DeclType::Variable {
-                        heap.variable_to_value_map.insert(signal, decl_statement.expression.numerical_value);
+                        heap.variable_to_value_map.insert(signal.clone(), 0);
                     }
                 }
 
@@ -1325,26 +1152,21 @@ struct Heap{
     variable_to_heap_map: HashMap<String, Heap>,
 }
 
-fn extract_original_content_from_span(path_to_content_map: &HashMap<String, String>, span: (usize, usize), file_path: &String) -> String {
+fn extract_original_content_from_span(path_to_content_map: &HashMap<String, String>, span: (usize, usize), file_path: &String) -> expression_parser::Stmt {
     let mut result = "";
-
     match path_to_content_map.get(file_path) {
         Some(content) => {
             result = &content[span.0..span.1];
         }
         None => {}
     }
+    println!("Try to parse {}", result);
 
-    let do_parse = true;
-    if do_parse {
-        let res = expression_parser::parse_statement(result);
-        // println!("Parsing expression result {:?}", res);
-    }
-
-    result.to_string()
+    expression_parser::parse_statement(result)
  }
 
-fn main() -> std::io::Result<()> {
+
+ fn main() -> std::io::Result<()> {
     let mut template_map: HashMap<String, Template> = HashMap::new();
     let mut main_component: Component = Component{
         name: String::from(""),
@@ -1353,7 +1175,7 @@ fn main() -> std::io::Result<()> {
         arguments: vec![],
     };
     let mut path_to_content_map = HashMap::<String, String>::new();
-    let path = std::fs::canonicalize("./src/lib/parser/sample_circuits/warships_raw.circom").expect("Invalid Path");
+    let path = std::fs::canonicalize("./src/lib/parser/sample_circuits/multiplier4.circom").expect("Invalid Path");
 
     let ctx = compile::build_context(&path);
 
@@ -1362,8 +1184,8 @@ fn main() -> std::io::Result<()> {
 
     for (path, source_file) in ctx.files {
         let path_as_string = path.clone().into_os_string().into_string().unwrap();
-        if !path_as_string.contains("warships_raw") {
-            // continue;
+        if !path_as_string.contains("multi") {
+            continue;
         }
         let content = fs::read_to_string(&path_as_string).expect("Failed to read file");
         
@@ -1429,18 +1251,24 @@ fn main() -> std::io::Result<()> {
     let mut running = true;
 
     let mut test_variable_to_value_map = HashMap::from([
-        ("board[1][0]".to_string(), 0 as u32),
-        ("board[0][2]".to_string(), 0 as u32),
-        ("board[2][1]".to_string(), 1 as u32),
-        ("board[0][1]".to_string(), 0 as u32),
-        ("board[1][1]".to_string(), 1 as u32),
-        ("board[1][2]".to_string(), 1 as u32),
-        ("board[2][0]".to_string(), 1 as u32),
-        ("board[2][2]".to_string(), 0 as u32),
-        ("board[0][0]".to_string(), 0 as u32),
-        ("ii".to_string(), 1 as u32),
-        ("jj".to_string(), 1 as u32)
+        ("in1".to_string(), 3),
+        ("in2".to_string(), 1),
+        ("in3".to_string(), 7),
+        ("in4".to_string(), 1),
     ]);
+    // let mut test_variable_to_value_map = HashMap::from([
+    //     ("board[1][0]".to_string(), 0 as u32),
+    //     ("board[0][2]".to_string(), 0 as u32),
+    //     ("board[2][1]".to_string(), 1 as u32),
+    //     ("board[0][1]".to_string(), 0 as u32),
+    //     ("board[1][1]".to_string(), 1 as u32),
+    //     ("board[1][2]".to_string(), 1 as u32),
+    //     ("board[2][0]".to_string(), 1 as u32),
+    //     ("board[2][2]".to_string(), 0 as u32),
+    //     ("board[0][0]".to_string(), 0 as u32),
+    //     ("ii".to_string(), 1 as u32),
+    //     ("jj".to_string(), 1 as u32)
+    // ]);
     heap.variable_to_value_map = test_variable_to_value_map;
     let mut actual_input_signal_vector : Vec<String> = vec![];
     let mut actual_output_signal_vector : Vec<String> = vec![];

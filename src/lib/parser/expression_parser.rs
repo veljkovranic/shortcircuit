@@ -1,7 +1,7 @@
 use pest::Parser;
 use std::process;
 use std::collections::HashMap;
-
+use std::fmt;
 
 #[derive(Parser)]
 #[grammar = "lib/parser/expression_grammar.pest"]
@@ -13,6 +13,19 @@ pub enum Operator {
     LogicalOp(LogicalOp),
     BitwiseOp(BitwiseOp),
     UnOp(UnOp),
+    LeftConstraint,
+    LeftSignalAssign,
+    RightConstraint,
+    RightSignalAssign,
+    Assignment,
+    PlusAssignment,
+    MinusAssignment,
+    TimesAssignment,
+    ExponentAssignment,
+    DivideAssignment,
+    QuotientAssignment,
+    ModuloAssignment,
+    SymmetricConstraintOp,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -55,21 +68,37 @@ pub enum UnOp {
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
-struct Variable{
-    id: String,
-    indexing: Vec<Expr>,
-    sub_variable: Option<Box<Variable>>
+pub struct Variable{
+    pub id: String,
+    pub indexing: Vec<Expr>,
+    pub sub_variable: Option<Box<Variable>>
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct ComponentInstance {
+    pub name: Variable,
+    pub parameter_list: Vec<Expr>
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct EvaluatedComponentInstance {
+    pub name: String,
+    pub parameter_list: Vec<u32>
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct BinaryOperation {
+    pub left: Box<Expr>,
+    pub op: BinOp,
+    pub right: Box<Expr>
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub enum Expr {
+    Empty, 
     Number(u32),
     ComplexVariable(Variable),
-    BinaryOperation {
-        left: Box<Expr>,
-        op: BinOp,
-        right: Box<Expr>,
-    },
+    BinaryOperation(BinaryOperation),
     LogicalOperation {
         left: Box<Expr>,
         op: LogicalOp,
@@ -89,42 +118,179 @@ pub enum Expr {
         true_value: Box<Expr>,
         false_value: Box<Expr>,
     },
+    ComponentInstance(ComponentInstance)
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct Constraint {
+    pub target: Variable,
+    pub value: Expr,
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct Assign {
+    pub target: Variable,
+    pub value: Expr,
+    pub assign_op: Operator,
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct ConditionalAssign {
+    pub condition: Expr,
+    pub true_value: Expr,
+    pub false_value: Expr,
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct Assert {
+    pub value: Expr
+}
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub struct SymmetricConstraint {
+    pub left: Expr,
+    pub right: Expr
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub enum Stmt {
-    Assign {
-        target: Expr,
-        value: Expr,
-    },
-    ConditionalAssign {
-        condition: Expr,
-        true_value: Expr,
-        false_value: Expr,
-    },
+    Constraint(Constraint),
+    Assign(Assign),
+    ConditionalAssign(ConditionalAssign),
     RegularExpr(Expr),
+    Assert(Assert),
+    SymmetricConstraint(SymmetricConstraint),
+    Empty,
 }
 
-pub fn evaluate(exp: Expr, heap: &HashMap<String, u32>) -> u32 {
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub enum EvaluationResult {
+    Empty,
+    Value(u32),
+    Identifier(String),
+    ComponentInstance(EvaluatedComponentInstance)
+}
+
+pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, u32>) -> String {
+    let mut res = "".to_string();
+    res = format!("{}{}", res, var_name.id);
+    if var_name.indexing.len() > 0 {
+        for index in 0..var_name.indexing.len() {
+            let index_evaluated = evaluate(&var_name.indexing[index], heap);
+            match index_evaluated {
+                EvaluationResult::Value(num) => {
+                    res = format!("{}[{}]", res, num.clone());
+                },
+                EvaluationResult::Identifier(num) => {
+                    match heap.get(&num) {
+                        Some(value) => {
+                            res = format!("{}[{}]", res, value.clone());
+                        },
+                        None => {
+                            res = format!("{}[{}]", res, num.clone());
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+        match &var_name.sub_variable {
+            Some(var) => {
+                res = format!("{}.{}", res, var.id);
+                if var.indexing.len() > 0 {
+                    for index in 0..var.indexing.len() {
+                        let index_evaluated = evaluate(&var.indexing[index], heap);
+                        match index_evaluated {
+                            EvaluationResult::Value(num) => {
+                                res = format!("{}[{}]", res, num.clone());
+                            },
+                            EvaluationResult::Identifier(num) => {
+                                match heap.get(&num) {
+                                    Some(value) => {
+                                        res = format!("{}[{}]", res, value.clone());
+                                    },
+                                    None => {
+                                        res = format!("{}[{}]", res, num.clone());
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            },
+            None => {}
+            }
+    }
+    res
+}
+
+pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> EvaluationResult {
     match exp {
         Expr::Number(value) => {
-            return value.clone();
+            return EvaluationResult::Value(value.clone());
         },
         Expr::ComplexVariable(var_name) => {
-            match heap.get(&var_name.id) {
+            let res = get_string_from_variable(&var_name, heap);
+
+            match heap.get(&res) {
                 Some(value) => {
-                    return value.clone();
+                    return EvaluationResult::Value(value.clone());
                 },
                 None => {
-                    println!("Variable {:?} not initialized", var_name);
+                    return EvaluationResult::Identifier(res.clone());
                 }
             }
         },
+        Expr::ComponentInstance(component) => {
+            let res = get_string_from_variable(&component.name, heap);
+            let mut params = vec![];
+            for param in &component.parameter_list {
+                match evaluate(param, heap) {
+                    EvaluationResult::Value(number) => {
+                        params.push(number);
+                    },
+                    _ => {}
+                }
+            }
+            return EvaluationResult::ComponentInstance(EvaluatedComponentInstance{
+                name: res,
+                parameter_list: params
+            });
+        },
+        Expr::BinaryOperation(bin_op) => {
+            // println!("Binary operation {:?}", *bin_op.left);
+            match evaluate(&*bin_op.left, heap) {
+                EvaluationResult::Value(number_l) => {
+                    match evaluate(&*bin_op.right, heap) {
+                        EvaluationResult::Value(number_r) => {
+                            match bin_op.op {
+                                BinOp::Multiply => {
+                                    return EvaluationResult::Value(number_l*number_r);
+                                },
+                                BinOp::Add => {
+                                    return EvaluationResult::Value(number_l+number_r);
+                                },
+                                BinOp::Subtract => {
+                                    return EvaluationResult::Value(number_l-number_r);
+                                },
+                                BinOp::Divide => {
+                                    return EvaluationResult::Value(number_l / number_r);
+                                },
+                                _ => {}
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                _ => { println!("Missing valuesluelue ");}
+            }
+        }
         _ => {
 
         }
     }
-    0 as u32
+    EvaluationResult::Empty
 }
 
 pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
@@ -180,6 +346,34 @@ pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
                 _ => {}
             }
         },
+        Rule::symmetric_constraint_op => {
+            match span.as_str() {
+                "===" => { return Operator::SymmetricConstraintOp;},
+                _ => {}
+            }
+        },
+        Rule::left_constraint_op | Rule::right_constraint_op => {
+            match span.as_str() {
+                "<==" => { return Operator::LeftConstraint;},
+                "<--" => { return Operator::LeftSignalAssign;},
+                "==>" => { return Operator::RightConstraint;},
+                "-->" => { return Operator::RightSignalAssign;},
+                _ => {}
+            }
+        },
+        Rule::assignment_op => {
+            match span.as_str() {
+                "=" => { return Operator::Assignment;},
+                "+=" => { return Operator::PlusAssignment;},
+                "-=" => { return Operator::MinusAssignment;},
+                "*=" => { return Operator::TimesAssignment;},
+                "**=" => { return Operator::ExponentAssignment;},
+                "/=" => { return Operator::DivideAssignment;},
+                "\\=" => { return Operator::QuotientAssignment;},
+                "%=" => { return Operator::ModuloAssignment;},
+                _ => {}
+            };
+        },
         _ => {
             println!("something else");
         }
@@ -188,13 +382,11 @@ pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
 }
 
 pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
-    let mut heap = HashMap::<String, u32>::new();
-    heap.insert("in".to_string(), 1 as u32);
-
     let rule: Rule = pairs.as_rule();
+    // println!("{:?}", rule);
+
     let span: pest::Span = pairs.as_span();
     let inner_pairs: Vec<pest::iterators::Pair<Rule>> = pairs.into_inner().into_iter().collect();
-    // println!("{:?}", rule);
     match rule {
         Rule::ternary_expr => {
             if inner_pairs.len() != 3 {
@@ -242,11 +434,11 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
                     if (op_index == 1) {
                         res = parse_expression(inner_pairs[op_index-1].clone())
                     }
-                    res = Expr::BinaryOperation{
+                    res = Expr::BinaryOperation(BinaryOperation{
                         left: Box::new(res),
                         op: op,
                         right: Box::new(parse_expression(inner_pairs[op_index+1].clone()))
-                    };
+                    });
                     op_index = op_index + 2;
                 }
                 return res;
@@ -263,11 +455,11 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
                     Operator::BinOp(lop) => {op = lop;},
                     _ => {}
                 };
-                return Expr::BinaryOperation{
+                return Expr::BinaryOperation(BinaryOperation{
                     left: Box::new(parse_expression(inner_pairs[0].clone())),
                     op: op,
                     right: Box::new(parse_expression(inner_pairs[2].clone()))
-                };
+                });
             }
         },
         Rule::exponent => {
@@ -281,11 +473,11 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
                     Operator::BinOp(lop) => {op = lop;},
                     _ => {}
                 };
-                return Expr::BinaryOperation{
+                return Expr::BinaryOperation(BinaryOperation{
                     left: Box::new(parse_expression(inner_pairs[0].clone())),
                     op: op,
                     right: Box::new(parse_expression(inner_pairs[2].clone()))
-                };
+                });
             }
         },
         Rule::bitwise_expr | Rule::shift_expr => {
@@ -323,6 +515,30 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
                 };
             }
         },
+        Rule::component_instance => {
+            let name_raw = parse_expression(inner_pairs[0].clone());
+            let mut name : Variable = Variable{
+                id : "".to_string(),
+                indexing: vec![],
+                sub_variable: None,
+            };
+            let mut params : Vec<Expr> = vec![];
+            if inner_pairs.len() > 1 {
+                for index in 1..inner_pairs.len() {
+                    params.push(parse_expression(inner_pairs[index].clone()));
+                }
+            }
+            match name_raw {
+                Expr::ComplexVariable(var) => {
+                    name = var;
+                }, 
+                _ => {}
+            };
+            return Expr::ComponentInstance(ComponentInstance{
+                name: name,
+                parameter_list: params
+            }); 
+        }
         Rule::factor => {
             if inner_pairs.len() > 2 {
                 // println!("not real factor");
@@ -370,7 +586,7 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
             return parse_expression(inner_pairs[0].clone())
         }
         Rule::identifier => {
-            println!("real identifier {}", span.as_str());
+            // println!("real identifier {}", span.as_str());
             return Expr::ComplexVariable(Variable{
                 id:span.as_str().to_string(),
                 indexing: vec![],
@@ -378,7 +594,7 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
             });
         },
         Rule::number => {
-            println!("real number {}", span.as_str());
+            // println!("real number {}", span.as_str());
             return Expr::Number(span.as_str().parse::<u32>().unwrap());
         },
         _ => {
@@ -386,12 +602,15 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
             println!("something else");
         }
     };                
-    Expr::Number(0)
+    Expr::Empty
 }
 
 pub fn parse_statement(line: &str) -> Stmt {
+    // println!("LINE TO PARSE: {}", line);
     match ExpressionParser::parse(Rule::statement, line) {
         Ok(statement) => {
+            // println!("{:?}", statement);
+
             for token in statement {
                 let rule: Rule = token.as_rule();
                 let span: pest::Span = token.as_span();
@@ -403,11 +622,100 @@ pub fn parse_statement(line: &str) -> Stmt {
                         if inner_pairs.len() != 3 {
                             return Stmt::RegularExpr(parse_expression(inner_pairs[0].clone()));
                         } else {
-                            return Stmt::ConditionalAssign{
+                            return Stmt::ConditionalAssign(ConditionalAssign{
                                 condition: parse_expression(inner_pairs[0].clone()),
                                 true_value: parse_expression(inner_pairs[1].clone()),
                                 false_value: parse_expression(inner_pairs[2].clone())
-                            };
+                            });
+                        }
+                    },
+                    Rule::constraint => {
+                        if inner_pairs.len() != 3 {
+                            println!("Error while parsing!");
+                        } else {
+                            let left = parse_expression(inner_pairs[0].clone());
+                            let op_raw = parse_operation(inner_pairs[1].clone());
+                            let right = parse_expression(inner_pairs[2].clone());
+
+                            match op_raw {
+                                Operator::LeftConstraint => {
+                                    match left {
+                                        Expr::ComplexVariable(var) => {
+                                            return Stmt::Constraint(Constraint{
+                                                target: var.clone(),
+                                                value: right.clone(),
+                                            });
+                                        },
+                                        _ => {}
+                                    }
+                                },
+                                Operator::RightConstraint => {
+                                    match right {
+                                        Expr::ComplexVariable(var) => {
+                                            return Stmt::Constraint(Constraint{
+                                                target: var.clone(),
+                                                value: left.clone()
+                                            });
+                                        }, _ => {}
+                                    }
+                                },
+                                Operator::LeftSignalAssign => {
+                                    match left {
+                                        Expr::ComplexVariable(var) => {
+                                            return Stmt::Assign(Assign{
+                                                target: var.clone(),
+                                                value: right.clone(),
+                                                assign_op: Operator::LeftSignalAssign
+                                            });
+                                        }, _ => {}
+                                    }
+                                },
+                                Operator::RightSignalAssign => {
+                                    match right {
+                                        Expr::ComplexVariable(var) => {
+                                            return Stmt::Assign(Assign{
+                                                target: var.clone(),
+                                                value: left.clone(),
+                                                assign_op: Operator::RightSignalAssign
+                                            });
+                                        }, _ => {}
+                                    }
+                                },
+                                _ => {
+                                    println!("Error while parsing!");
+                                }
+                            }
+                        }
+                    },
+                    Rule::assignment => {
+                        if inner_pairs.len() != 3 {
+                            println!("Error while parsing!");
+                        } else {
+                            let left = parse_expression(inner_pairs[0].clone());
+                            let op_raw = parse_operation(inner_pairs[1].clone());
+                            let right = parse_expression(inner_pairs[2].clone());
+                            match left {
+                                Expr::ComplexVariable(var) => {
+                                    return Stmt::Assign(Assign{
+                                        target: var,
+                                        value: right.clone(),
+                                        assign_op: op_raw
+                                    });
+                                }, _ => {}
+                            }
+
+                        }
+                    },
+                    Rule::assertion => {
+                        if inner_pairs.len() == 3 {
+                            return Stmt::SymmetricConstraint(SymmetricConstraint{
+                                left: parse_expression(inner_pairs[0].clone()),
+                                right: parse_expression(inner_pairs[2].clone())
+                            });
+                        } else {
+                            return Stmt::Assert(Assert{
+                                value: parse_expression(inner_pairs[0].clone())
+                            });
                         }
                     },
                     _ => {
@@ -418,13 +726,5 @@ pub fn parse_statement(line: &str) -> Stmt {
             },
         _ => {}
     };
-    Stmt::Assign {
-        target: Expr::ComplexVariable(Variable{
-            id: "example".to_string(),
-            indexing: vec![],
-            sub_variable: None,
-        }),
-        value: Expr::Number(0),
-    };
-    process::exit(1);
+    Stmt::Empty
 }

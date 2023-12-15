@@ -20,5 +20,12 @@ arith_expr = { term ~ ( add_op ~ term )* }
 logical_expr = { arith_expr ~ ( logical_op ~ arith_expr )* }
 ternary_expr = { logical_expr ~ ("?" ~ expression ~ ":" ~ expression)? }
 expression = _{ ternary_expr }
-assignment = { identifier ~ "=" ~ expression }
-statement = _{ assignment | expression }
+assignment_op = {"=" | "+=" | "-=" | "*=" | "**=" | "/=" | "\\=" | "%="}
+component_instance = { identifier ~ "(" ~ (expression ~ ( "," ~ expression)?)* ~ ")"}
+assignment = { complex_variable ~ assignment_op ~ (component_instance | expression) }
+left_constraint_op = { "<==" | "<--"}
+right_constraint_op = { "==>" | "-->" }
+symmetric_constraint_op = {"==="}
+constraint = { (complex_variable ~ left_constraint_op ~ expression) | (expression ~ right_constraint_op ~ complex_variable) }
+assertion = { "assert(" ~ logical_expr ~")" | (expression ~ symmetric_constraint_op ~ expression)}
+statement = _{ assignment | constraint | assertion | expression }

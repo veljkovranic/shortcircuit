@@ -12,6 +12,7 @@ name = "snarkrs"
 path = "src/bin.rs"
 
 [dependencies]
+backtrace = "0.3.69"
 pest = "2.1.0"
 pest_derive = "2.1.0"
 serde = { version = "1.0", features = ["derive"] }
