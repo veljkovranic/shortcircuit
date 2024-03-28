@@ -1,6 +1,6 @@
-use parser::ast;
-use parser::matchers;
-use parser::errors;
+use crate::parser::ast;
+use crate::parser::matchers;
+use crate::parser::errors;
 
 #[derive(Debug)]
 pub enum LoadAttempt {

@@ -1,5 +1,5 @@
-use parser::ast::tokens::*;
-use parser::ast::Rule;
+use crate::parser::ast::tokens::*;
+use crate::parser::ast::Rule;
 
 pub fn process_include_path_string(include_path_string: & NonTerminalToken) -> & str {
 

@@ -1,6 +1,7 @@
 [package]
 name = "shortcircuit"
 version = "0.1.0"
+edition = "2021"
 authors = ["Veljko Vranic (veljkovranic) <byblos94@gmail.com>"]
 
 [lib]
@@ -17,6 +18,9 @@ pest = "2.1.0"
 pest_derive = "2.1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.1"
+warp = "0.3"
+tokio = { version = "1", features = ["full"] }
+anyhow = "*"
 
 [dev-dependencies]
 galvanic-assert = "0.8.7"

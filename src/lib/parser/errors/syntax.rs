@@ -1,5 +1,5 @@
 use std::fmt;
-use parser::errors::common_displayer;
+use crate::parser::errors::common_displayer;
 
 ///
 /// E101: Syntax Error

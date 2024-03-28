@@ -12,10 +12,13 @@ use libsnarkrs::parser::expression_parser;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use serde::Serialize;
 use std::process;
 use backtrace::Backtrace;
 use expression_parser::*;
+use serde::{Serialize, Deserialize};
+use warp::{http::Response, Filter};
+use anyhow::Result;
+use warp::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN};
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Template{
@@ -880,6 +883,180 @@ fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Compone
     Ok(())
 }
 
+/*
+  {
+    id: '1',
+    type: 'input',
+    data: { label: 'Node 0' },
+    position: { x: 250, y: 5 },
+    className: 'light',
+  },
+  {
+    id: '2',
+    data: { label: 'Group A' },
+    position: { x: 100, y: 100 },
+    className: 'light',
+    style: { backgroundColor: 'rgba(255, 0, 0, 0.2)', width: 200, height: 200 },
+  },
+  {
+    id: '2a',
+    data: { label: 'Node A.1' },
+    position: { x: 10, y: 50 },
+    parentNode: '2',
+  },
+*/
+
+#[derive(Serialize, Debug, Clone)]
+struct NodePosition{
+    x: usize,
+    y: usize,
+}
+#[derive(Serialize, Debug, Clone)]
+struct NodeData {
+    label: String
+}
+
+
+#[derive(Serialize, Debug, Clone)]
+struct Style{
+    backgroundColor: String,
+    width: u32,
+    height: u32
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct Node {
+    id: String,
+    r#type: String,
+    data: NodeData,
+    position: NodePosition,
+    className: String,
+    style: Option<Style>
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct Edge{
+    id: String,
+    source: String,
+    target: String,
+}
+
+fn serialize_for_visual(template_map: &HashMap<String, Template>, main_component: Component) -> Result<(Vec<Node>, Vec<Edge>)> {
+    let mut nodes : Vec<Node> = vec![];
+    let mut edges : Vec<Edge> = vec![];
+    let mut curr_x = 0;
+    let mut curr_y = 0;
+
+    let main_template = template_map.get(&main_component.template_to_use).expect("main initialization is wrong");
+
+    nodes.push(Node{
+        id: main_template.name.clone(),
+        r#type: "group".to_string(),
+        data: NodeData{label:main_template.name.clone()},
+        position: NodePosition{x:curr_x, y:curr_y},
+        className: "light".to_string(),
+        style: Some(Style{ backgroundColor: String::from("rgba(255, 0, 0, 0.2)"), width: 300, height: 300})
+    });
+
+    println!("{:?}", main_template.output_signals);
+    nodes.push(Node{
+        id: String::from("output"),
+        r#type: "output".to_string(),
+        data: NodeData{label:String::from("output")},
+        position: NodePosition{x:200, y:200},
+        className: "light".to_string(),
+        style: None
+    });
+
+    for input_signal in &main_template.private_input_signals {
+        nodes.push(Node{
+            id: input_signal.name.clone(),
+            r#type: "input".to_string(),
+            data: NodeData{label:input_signal.name.clone()},
+            position: NodePosition{x:curr_x, y:curr_y},
+            className: "light".to_string(),
+            style: None
+        });
+        edges.push(Edge{
+            id: format!("e{}",curr_y),
+            source: input_signal.name.clone(),
+            target: "output".to_string(),
+        });
+        curr_y = curr_y + 50;
+    }
+
+    for interm_signal in &main_template.intermediate_signals {
+        println!("Interm signal {:?}", interm_signal);
+        nodes.push(Node{
+            id: interm_signal.name.clone(),
+            r#type: "input".to_string(),
+            data: NodeData{label:interm_signal.name.clone()},
+            position: NodePosition{x:curr_x, y:curr_y},
+            className: "light".to_string(),
+            style: None
+        });
+        edges.push(Edge{
+            id: format!("e{}",curr_y),
+            source: interm_signal.name.clone(),
+            target: "output".to_string(),
+        });
+        curr_y = curr_y + 50;
+    }
+
+
+    // println!("Components {:?}", &main_template.components);
+    // for component in &main_template.components {
+    //     curr_x = curr_x + 40;
+    //     // curr_y = curr_y + 20; 
+    //     // println!("Component category {:?}", component.template_to_use.clone());
+    //     // println!("Component key {:?}", component.name.clone());
+
+
+    //     // println!("{:?}", template_map);
+    //     match template_map.get(&component.template_to_use) {
+    //         Some(templ) => {
+    //             components.push(OutputFormat{
+    //                 category: templ.name.clone(),
+    //                 key: component.name.clone(),
+    //                 loc: format!("{} {}", curr_x, curr_y),
+    //                 isGroup: false,
+    //                 group: main_template.name.clone()
+    //             });
+
+    //             let mut signals = "".to_string();
+    //             let mut coordinate = 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
+    //             for i_signal in &templ.private_input_signals {
+    //                 let signal_template = format!(r#"$(go.Shape, "Rectangle", portStyle(true),  
+    //                 {{ portId: "{}", alignment: new go.Spot(0, {}) }})"#, i_signal.name, coordinate);
+    //                 signals = format!("{},{}", signal_template, signals);
+    //                 coordinate += 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
+    //             }
+    //             template_data = format!(r#"
+    //                 var {}Template =
+    //                 $(go.Node, "Spot", nodeStyle(),
+    //                   $(go.Shape, "Rectangle", templateStyle(),
+    //                     {{ fill: blue }}),
+    //                   {}
+    //                   $(go.Shape, "Rectangle", portStyle(false),
+    //                     {{ portId: "out", alignment: new go.Spot(1, 0.5) }}),
+    //                     $(go.TextBlock,
+    //                       {{ alignment: go.Spot.Center, font: "12pt Sans-Serif" }},
+    //                       new go.Binding("text", "key"))
+    //                 );"#, templ.name.clone(), signals).to_string();
+    //             pallete_data = format!(r#"myDiagram.nodeTemplateMap.add("{}", {}Template);"#, templ.name.clone(), templ.name.clone()).to_string();
+    //             model_data = format!(r#"{{ category: "{}" }},"#, templ.name.clone()).to_string();
+    //         },
+    //         None => {
+
+    //         }
+    //     }
+    // }
+        
+    println!("{:?}", edges);
+    println!("{:?}", nodes);
+    Ok((nodes, edges))
+}
+
 fn produce_signals(base_name: String, limit_per_dimension: &[u32]) -> Vec<String> {
     let mut names = vec![];
 
@@ -1165,8 +1342,7 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
     expression_parser::parse_statement(result)
  }
 
-
- fn main() -> std::io::Result<()> {
+ fn extract_values() -> Result<(Vec<Node>, Vec<Edge>)> {
     let mut template_map: HashMap<String, Template> = HashMap::new();
     let mut main_component: Component = Component{
         name: String::from(""),
@@ -1322,8 +1498,28 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
     println!("{:?}", actual_component_vector);
 
     //Drawing
-    // draw_it_out(&template_map, main_component.clone());
+    serialize_for_visual(&template_map, main_component.clone())
+ }
 
-    Ok(())
+ #[tokio::main]
+ async fn main() {
+    let (nodes, edges) = extract_values().unwrap();
+    let cors = warp::cors()
+    .allow_any_origin()
+    .allow_headers(vec!["*"])
+    .allow_methods(vec!["GET", "POST", "DELETE", "PUT", "OPTIONS"]);
+
+    let route = warp::path("graph-data")
+    .and(warp::get())
+    .map(move || {
+        let graph_data = serde_json::json!({ "initialNodes": nodes, "initialEdges": edges });
+        println!("Serving new request");
+        Response::builder().header("Content-Type", "application/json").body(serde_json::to_string(&graph_data).unwrap())
+    }).with(cors);
+
+    println!("serving on 0.0.0.0:3030");
+
+    warp::serve(route).run(([0, 0, 0, 0], 3030)).await;
+
 }
 

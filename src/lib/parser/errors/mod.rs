@@ -2,8 +2,8 @@ pub mod include;
 pub mod syntax;
 pub mod common_displayer;
 
-use parser::ast::ParseError;
-use parser::errors::include::UnknownFileIncludeError;
+use crate::parser::ast::ParseError;
+use crate::parser::errors::include::UnknownFileIncludeError;
 
 #[derive(Debug)]
 pub enum CompileError {

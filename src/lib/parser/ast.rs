@@ -7,7 +7,7 @@ struct CircuitParser;
 
 pub mod tokens {
 
-    use parser::ast;
+    use crate::parser::ast;
 
     ///
     /// Enumeration containing the two types of AST tokens.
