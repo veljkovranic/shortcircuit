@@ -3,7 +3,7 @@ import { Handle, Position } from 'reactflow';
 const CustomNode = ({ data, id}) => {
 
   return (
-    <div onDoubleClick={() => data.onChildAction(data.label)} style={{ borderStyle: 'solid', height: '100%',	display: 'flex',	alignItems: 'center'}} >
+    <div onDoubleClick={() => data.onChildAction(data.label, data.parent)} style={{ borderStyle: 'solid', height: '100%',	display: 'flex',	alignItems: 'center'}} >
     {Array.from({ length: data.inputHandles }).map((_, index) => (
         <Handle
           type="target"
@@ -15,7 +15,8 @@ const CustomNode = ({ data, id}) => {
       ))}
       {/* <Handle type="target" position={Position.Top} /> */}
       <label htmlFor="text" style={{overflow: 'hidden', width: '100%'}}>{data.label}</label>
-      <Handle type="source" position={Position.Bottom}/>
+      <Handle type="source" position={Position.Bottom}  id={`${data.label}.out`}
+          key={`${data.label}.out`}/>
     </div>
   );
 };

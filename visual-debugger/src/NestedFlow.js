@@ -96,10 +96,11 @@ const initialEdges = [
   { id: 'e4b1-4b2', source: '4b1', target: '4b2' },
 ];
 
-const fetchGraphData = async (component) => {
+const fetchGraphData = async (component, parent) => {
   try {
     const encodedComponent = encodeURIComponent(component);
-    const url = `http://0.0.0.0:3030/graph-data/${encodedComponent}`;
+    const parentComponent =  encodeURIComponent(parent);
+    const url = `http://0.0.0.0:3030/graph-data/${encodedComponent}/${parent}`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -115,39 +116,26 @@ const NestedFlow = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  const update_nodes = async (component) => {
-    const graphData = await fetchGraphData(component);
-        console.log(graphData);
-        for (let node in graphData.initialNodes) {
-          if (node.type == 'customNode') {
-            console.log("CUSTOM NODE FIDDLE");
-            node.data = { label:node.data.label, onChildAction: fetchGraphData }
-          }
+  const update_nodes = async (component, parent) => {
+    const graphData = await fetchGraphData(component, parent);
+    for (let nodeId in graphData.initialNodes) {
+      let node = graphData.initialNodes[nodeId];
+      if (node.type === 'customNode') {
+        if (!node.data) {
+          node.data = {};
         }
-  
-        if (graphData) {
-          setNodes(graphData.initialNodes);
-          setEdges(graphData.initialEdges);
-        }
+        node.data.onChildAction = update_nodes;
+        node.data.parent = graphData.initialNodes[0].id;
+      }
+    }
+    if (graphData) {
+      setNodes(graphData.initialNodes);
+      setEdges(graphData.initialEdges);
+    }
   };
 
   useEffect(() => {
-    const loadGraphData = async () => {
-      const graphData = await fetchGraphData('main');
-      for (let node in graphData.initialNodes) {
-        if (graphData.initialNodes[node].type == "customNode") {
-          console.log("CUSTOM NODE FIDDLE");
-          graphData.initialNodes[node].data = { label:graphData.initialNodes[node].data.label, onChildAction: update_nodes }
-          console.log(graphData.initialNodes[node]);
-
-        }
-      }
-
-      if (graphData) {
-        setNodes(graphData.initialNodes);
-        setEdges(graphData.initialEdges);
-      }
-    };
+    const loadGraphData = async() => {await update_nodes('main', 'main')};
 
     loadGraphData();
   }, []);

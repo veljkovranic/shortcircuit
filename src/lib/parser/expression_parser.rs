@@ -83,7 +83,7 @@ pub struct ComponentInstance {
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct EvaluatedComponentInstance {
     pub name: String,
-    pub parameter_list: Vec<u32>
+    pub parameter_list: Vec<i32>
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
@@ -96,7 +96,7 @@ pub struct BinaryOperation {
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub enum Expr {
     Empty, 
-    Number(u32),
+    Number(i32),
     ComplexVariable(Variable),
     BinaryOperation(BinaryOperation),
     LogicalOperation {
@@ -184,16 +184,17 @@ pub enum Stmt {
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub enum EvaluationResult {
     Empty,
-    Value(u32),
+    Value(i32),
     Identifier(String),
+    Boolean(bool),
     ComponentInstance(EvaluatedComponentInstance)
 }
 pub trait Serializable {
-    fn serialize(&self, heap: &mut HashMap<String, u32>) -> String;
+    fn serialize(&self, heap: &mut HashMap<String, i32>) -> String;
 }
 
 impl Serializable for Variable {
-    fn serialize(&self, heap: &mut HashMap<String, u32>) -> String {
+    fn serialize(&self, heap: &mut HashMap<String, i32>) -> String {
         let mut res = "".to_string();
         res = format!("{}{}", res, self.id);
         let var_name = self;
@@ -276,7 +277,8 @@ impl Serializable for Variable {
         res
     }
 }
-pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, u32>) -> String {
+
+pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, i32>) -> String {
     let mut res = "".to_string();
     res = format!("{}{}", res, var_name.id);
     if var_name.indexing.len() > 0 {
@@ -326,18 +328,46 @@ pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, 
             },
             None => {}
             }
+    } else {
+        match &var_name.sub_variable {
+            Some(var) => {
+                res = format!("{}.{}", res, var.id);
+                if var.indexing.len() > 0 {
+                    for index in 0..var.indexing.len() {
+                        let index_evaluated = evaluate(&var.indexing[index], heap);
+                        match index_evaluated {
+                            (EvaluationResult::Value(num), vec) => {
+                                res = format!("{}[{}]", res, num.clone());
+                            },
+                            (EvaluationResult::Identifier(num), vec) => {
+                                match heap.get(&num) {
+                                    Some(value) => {
+                                        res = format!("{}[{}]", res, value.clone());
+                                    },
+                                    None => {
+                                        res = format!("{}[{}]", res, num.clone());
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            },
+            None => {}
+            }
     }
     res
 }
 
-pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> (EvaluationResult, Vec<String>) {
+pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, i32>) -> (EvaluationResult, Vec<String>) {
     match exp {
         Expr::Number(value) => {
             return (EvaluationResult::Value(value.clone()), vec![]);
         },
         Expr::ComplexVariable(var_name) => {
             let res = get_string_from_variable(&var_name, heap);
-
+            // println!("COMPLEX VAR {:?}", res);
             match heap.get(&res) {
                 Some(value) => {
                     return (EvaluationResult::Value(value.clone()), vec![res]);
@@ -364,7 +394,6 @@ pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> (EvaluationResul
             }), vec![]);
         },
         Expr::BinaryOperation(bin_op) => {
-            // println!("Binary operation {:?}", *bin_op.left);
             match evaluate(&*bin_op.left, heap) {
                 (EvaluationResult::Value(number_l), mut vec_l) => {
                     match evaluate(&*bin_op.right, heap) {
@@ -388,10 +417,66 @@ pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> (EvaluationResul
                         },
                         _ => {}
                     }
+                    return (EvaluationResult::Value(number_l), vec_l);
                 },
-                _ => { println!("Missing valuesluelue ");}
+                _ => { println!("Missing valuesluelue" );}
             }
-        }
+        },
+        Expr::UnaryOperation{op, expr} => {
+            if *op == UnOp::Negate {
+                match evaluate(&*expr, heap) {
+                    (EvaluationResult::Value(num), vec_l) => {
+                        return (EvaluationResult::Value(-num), vec_l);
+                    },
+                    _ => {}
+                }
+            }
+        },
+        Expr::Conditional { condition, true_value, false_value } => {
+            println!("condition {:?}", condition);
+            match evaluate(&*condition, heap) {
+                (EvaluationResult::Boolean(res), vec1) => {
+                    if res {
+                        match evaluate(&*true_value, heap) {
+                            (EvaluationResult::Value(num), vec_l) => {
+                                return (EvaluationResult::Value(num), vec_l);
+                            },
+                            _ => {}
+                        }
+                    } else {
+                        match evaluate(&*false_value, heap) {
+                            (EvaluationResult::Value(num), vec_l) => {
+                                return (EvaluationResult::Value(num), vec_l);
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+                _ => {println!("error on conditional");}
+            }
+        },
+        Expr::LogicalOperation { left, op, right } => {
+            println!("logop {:?}", left);
+            match evaluate(&*left, heap) {
+                (EvaluationResult::Value(number_l), mut vec_l) => {
+                    match evaluate(&*right, heap) {
+                        (EvaluationResult::Value(number_r), mut vec_r) => {
+                            vec_l.append(vec_r.as_mut());
+                            println!("odje smo {:?}", op);
+                            match op {
+                                LogicalOp::Equal => {
+                                    return (EvaluationResult::Boolean(number_l == number_r), vec_l);
+                                },
+                                _ => {return (EvaluationResult::Boolean(number_l == number_r), vec_l);}
+                            }
+                        },
+                        _ => {}
+                    }
+                    return (EvaluationResult::Value(number_l), vec_l);
+                },
+                _ => { println!("Missing valuesluelue" );}
+            }
+        },
         _ => {
 
         }
@@ -405,6 +490,14 @@ pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
     let inner_pairs: Vec<pest::iterators::Pair<Rule>> = pairs.into_inner().into_iter().collect();
 
     // println!("{:?}", rule);
+    // println!("{:?}", span);
+    // println!("{:?}", inner_pairs);
+
+    if inner_pairs.len() == 0 {
+        //TODO fix this  v
+        return Operator::LeftConstraint;
+    }
+
     match rule {
         Rule::ternary_expr | Rule::logical_expr | Rule::arith_expr | Rule::term | Rule::exponent | Rule::bitwise_expr | Rule::shift_expr | Rule::unary_expr | Rule::factor | Rule::complex_variable | Rule::identifier | Rule::number=> {
             return parse_operation(inner_pairs[0].clone());
@@ -483,7 +576,7 @@ pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
         _ => {
             println!("something else");
         }
-    };             
+    };
     Operator::BinOp(BinOp::Add)
 }
 
@@ -701,7 +794,7 @@ pub fn parse_expression(pairs: pest::iterators::Pair<Rule>) -> Expr {
         },
         Rule::number => {
             // println!("real number {}", span.as_str());
-            return Expr::Number(span.as_str().parse::<u32>().unwrap());
+            return Expr::Number(span.as_str().parse::<i32>().unwrap());
         },
         _ => {
             println!("{:?}", rule);
