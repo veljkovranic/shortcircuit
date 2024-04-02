@@ -9,6 +9,7 @@ use libsnarkrs::parser::compile;
 use libsnarkrs::parser::ast::tokens::Token;
 use libsnarkrs::parser::ast::Rule;
 use libsnarkrs::parser::expression_parser;
+use pest::pratt_parser::Op;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -19,6 +20,8 @@ use serde::{Serialize, Deserialize};
 use warp::{http::Response, Filter};
 use anyhow::Result;
 use warp::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN};
+use std::path::Path;
+use std::env;
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Template{
@@ -96,19 +99,19 @@ struct ForLoop {
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
-struct Variable{
+struct ExecutionVariable{
     id: String,
     indexing: Vec<String>,
-    sub_variable: Option<Box<Variable>>,
+    sub_variable: Option<Box<ExecutionVariable>>,
     is_constant: bool,
     numerical_value: u32,
 }
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 struct Evaluation {
-    variables: Vec<Variable>,
+    variables: Vec<ExecutionVariable>,
     operation: Operation,
-    params: Vec<Variable>
+    params: Vec<ExecutionVariable>
 }
 
 
@@ -328,13 +331,13 @@ fn parse_declaration_statement(declaration_statement_root: &Vec<Token>, path: &S
     statement
 }
 
-fn parse_compl_variable(container: &Token) -> Variable {
-    let mut compl_variable = Variable{
+fn parse_compl_variable(container: &Token) -> ExecutionVariable {
+    let mut compl_variable = ExecutionVariable{
         id: "".to_string(),
         indexing: vec![],
         is_constant: false,
         numerical_value: 0,
-        sub_variable: Some(Box::new(Variable{
+        sub_variable: Some(Box::new(ExecutionVariable{
             id: "".to_string(),
             indexing: vec![],
             sub_variable: None,
@@ -655,257 +658,6 @@ fn get_used_templates(template_map: &HashMap<String, Template>, start_node: Comp
     set
 }
 
-fn draw_it_out(template_map: &HashMap<String, Template>, main_component: Component) -> std::io::Result<()> {
-    #[derive(Serialize)]
-    struct OutputFormat {
-        category: String,
-        key: String,
-        loc: String,
-        isGroup: bool,
-        group: String,
-    }
-
-    #[derive(Serialize)]
-    struct Link{
-        from: String,
-        fromPort: String,
-        to: String,
-        toPort: String
-    }
-    let mut components : Vec<OutputFormat> = vec![];
-    let mut links : Vec<Link> = vec![];
-
-    let mut curr_x = 0;
-    let mut curr_y = 0;
-
-    let mut template_data = "".to_string();
-    let mut pallete_data = "".to_string();
-    let mut model_data = "".to_string();
-
-    match template_map.get(&main_component.template_to_use) {
-        Some(main_template) => {
-            components.push(OutputFormat{
-                key: main_template.name.clone(),
-                isGroup: true,
-                category: "none".to_string(),
-                loc: format!("{}  {}", 200, 0),
-                group: "".to_string()
-            });
-            components.push(OutputFormat{
-                key: "Private inputs".to_string(),
-                isGroup: true,
-                group: "".to_string(),
-                category: "none".to_string(),
-                loc: format!("{}  {}", 0, 0),
-            });
-
-            for input_signal in &main_template.private_input_signals {
-                components.push(OutputFormat{
-                    category: "privateInput".to_string(),
-                    key: input_signal.name.clone(),
-                    loc: format!("{}  {}", curr_x, curr_y),
-                    isGroup: false,
-                    group: "Private inputs".to_string()
-                });
-                curr_y += 50;
-            }
-
-            curr_x += 50;
-            for i_signal in &main_template.intermediate_signals {
-                components.push(OutputFormat{
-                    category: "temp".to_string(),
-                    key: i_signal.name.clone(),
-                    loc: format!("{}  {}", curr_x, curr_y),
-                    isGroup: false,
-                    group: main_template.name.clone()
-                });
-                curr_y += 50;
-                // components.push(OutputFormat{
-                //     category: "temp".to_string(),
-                //     key: i_signal.expression.content.clone(),
-                //     loc: format!("{}  {}", curr_x, curr_y),
-                //     isGroup: false,
-                //     group: main_template.name.clone()
-                // });
-
-                // for dependency in &i_signal.expression.variables {
-                //     links.push(Link{
-                //         from: dependency.clone(),
-                //         fromPort: "out".to_string(),
-                //         to: i_signal.expression.content.clone(),
-                //         toPort: "in1".to_string()
-                //     });
-                // }
-                // links.push(Link{
-                //     from: i_signal.expression.content.clone(),
-                //     fromPort: "out".to_string(),
-                //     to: i_signal.name.clone(),
-                //     toPort: "in1".to_string()
-                // });
-                curr_y += 20;
-            }
-
-            components.push(OutputFormat{
-                category: "outputgroup".to_string(),
-                key: "Output".to_string(),
-                loc: format!("{}  {}", 400, 0),
-                isGroup: true,
-                group: "".to_string()
-            });
-
-            curr_x += 50;
-            // for constraint in &main_template.constraints {
-            //     components.push(OutputFormat{
-            //         category: "temp".to_string(),
-            //         key: constraint.content.clone(),
-            //         loc: format!("{}  {}", curr_x, curr_y),
-            //         isGroup: false,
-            //         group: main_template.name.clone()
-            //     });
-            //     curr_y += 20;
-
-            //     for dependency in &constraint.variables {
-            //         links.push(Link{
-            //             from: dependency.clone(),
-            //             fromPort: "out".to_string(),
-            //             to: constraint.content.clone(),
-            //             toPort: "in".to_string()
-            //         });
-            //     }
-            //     links.push(Link{
-            //         from: constraint.content.clone(),
-            //         fromPort: "out".to_string(),
-            //         to: constraint.content.clone(),
-            //         toPort: "in".to_string()
-            //     });
-            //     curr_y += 50;
-                
-            // }
-            curr_x += 50;
-            for o_signal in &main_template.output_signals {
-                components.push(OutputFormat{
-                    category: "output".to_string(),
-                    key: o_signal.name.clone(),
-                    loc: format!("{}  {}", curr_x, curr_y),
-                    isGroup: false,
-                    group: "Output".to_string()
-                });
-                curr_y +=20;
-            }
-
-            // println!("Components {:?}", &main_template.components);
-            for component in &main_template.components {
-                curr_x = curr_x + 40;
-                // curr_y = curr_y + 20; 
-                // println!("Component category {:?}", component.template_to_use.clone());
-                // println!("Component key {:?}", component.name.clone());
-
-
-                // println!("{:?}", template_map);
-                match template_map.get(&component.template_to_use) {
-                    Some(templ) => {
-                        components.push(OutputFormat{
-                            category: templ.name.clone(),
-                            key: component.name.clone(),
-                            loc: format!("{} {}", curr_x, curr_y),
-                            isGroup: false,
-                            group: main_template.name.clone()
-                        });
-
-                        let mut signals = "".to_string();
-                        let mut coordinate = 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
-                        for i_signal in &templ.private_input_signals {
-                            let signal_template = format!(r#"$(go.Shape, "Rectangle", portStyle(true),  
-                            {{ portId: "{}", alignment: new go.Spot(0, {}) }})"#, i_signal.name, coordinate);
-                            signals = format!("{},{}", signal_template, signals);
-                            coordinate += 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
-                        }
-                        template_data = format!(r#"
-                            var {}Template =
-                            $(go.Node, "Spot", nodeStyle(),
-                              $(go.Shape, "Rectangle", templateStyle(),
-                                {{ fill: blue }}),
-                              {}
-                              $(go.Shape, "Rectangle", portStyle(false),
-                                {{ portId: "out", alignment: new go.Spot(1, 0.5) }}),
-                                $(go.TextBlock,
-                                  {{ alignment: go.Spot.Center, font: "12pt Sans-Serif" }},
-                                  new go.Binding("text", "key"))
-                            );"#, templ.name.clone(), signals).to_string();
-                        pallete_data = format!(r#"myDiagram.nodeTemplateMap.add("{}", {}Template);"#, templ.name.clone(), templ.name.clone()).to_string();
-                        model_data = format!(r#"{{ category: "{}" }},"#, templ.name.clone()).to_string();
-                    },
-                    None => {
-
-                    }
-                }
-            }
-        },
-        None => {
-            println!("main initialization is wrong");
-        }
-    }
-
-    let mut prev_temp_name = main_component.template_to_use.clone();
-    
-    
-    let serialized_nodes = serde_json::to_string(&components).unwrap();
-    let serialized_links = serde_json::to_string(&links).unwrap();
-
-    let json_data = format!(r#"{{
-        "class": "go.GraphLinksModel",
-        "linkFromPortIdProperty": "fromPort",
-        "linkToPortIdProperty": "toPort",
-        "nodeDataArray": {}, 
-        "linkDataArray": {}
-    }}"#, serialized_nodes, serialized_links);
-
-    
-    // Create a file
-    let file_path = "src/visual/logicCircuit.html";
-
-    // Read the content of the HTML file
-    let content = fs::read_to_string(file_path)?;
-
-    // The string to replace
-    let to_replace = "###replaceme###";
-    let to_replace_template = "//replace with template";
-
-    // println!("{}", template_data);
-    let mut updated_content = content.replace(to_replace, &json_data);
-    updated_content = updated_content.replace(to_replace_template, &template_data);
-    updated_content = updated_content.replace("//replace_to_add_template_to_pallete", &pallete_data);
-    updated_content = updated_content.replace("//replace_to_add_template_categories", &model_data);
-    // Write the updated content back to the file
-    let mut file = fs::File::create(file_path)?;
-    file.write_all(updated_content.as_bytes())?;
-
-    Ok(())
-}
-
-/*
-  {
-    id: '1',
-    type: 'input',
-    data: { label: 'Node 0' },
-    position: { x: 250, y: 5 },
-    className: 'light',
-  },
-  {
-    id: '2',
-    data: { label: 'Group A' },
-    position: { x: 100, y: 100 },
-    className: 'light',
-    style: { backgroundColor: 'rgba(255, 0, 0, 0.2)', width: 200, height: 200 },
-  },
-  {
-    id: '2a',
-    data: { label: 'Node A.1' },
-    position: { x: 10, y: 50 },
-    parentNode: '2',
-  },
-*/
-
 #[derive(Serialize, Debug, Clone)]
 struct NodePosition{
     x: usize,
@@ -913,7 +665,8 @@ struct NodePosition{
 }
 #[derive(Serialize, Debug, Clone)]
 struct NodeData {
-    label: String
+    label: String,
+    inputHandles: u32
 }
 
 
@@ -931,7 +684,9 @@ struct Node {
     data: NodeData,
     position: NodePosition,
     className: String,
-    style: Option<Style>
+    style: Option<Style>,
+    draggable: Option<bool>,
+    selectable: Option<bool>
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -939,121 +694,138 @@ struct Edge{
     id: String,
     source: String,
     target: String,
+    targetHandle: Option<String>
 }
 
-fn serialize_for_visual(template_map: &HashMap<String, Template>, main_component: Component) -> Result<(Vec<Node>, Vec<Edge>)> {
+fn serialize_for_visual(template_map: &HashMap<String, Template>, main_component: Component, heap: Heap) -> Result<(Vec<Node>, Vec<Edge>)> {
     let mut nodes : Vec<Node> = vec![];
     let mut edges : Vec<Edge> = vec![];
-    let mut curr_x = 0;
-    let mut curr_y = 0;
+    let mut curr_x = 20;
+    let mut curr_y = 20;
 
     let main_template = template_map.get(&main_component.template_to_use).expect("main initialization is wrong");
 
     nodes.push(Node{
+        id: "title".to_string(),
+        r#type: "default".to_string(),
+        className: "annotation".to_string(),
+        data: NodeData{
+            label: main_template.name.clone(),
+            inputHandles: 1
+        },
+        draggable: Some(false),
+        selectable: Some(false),
+        style: None,
+        position:  NodePosition{x:0, y:0}});
+
+    nodes.push(Node{
         id: main_template.name.clone(),
         r#type: "group".to_string(),
-        data: NodeData{label:main_template.name.clone()},
-        position: NodePosition{x:curr_x, y:curr_y},
+        data: NodeData{label:main_template.name.clone(), inputHandles: 1},
+        position: NodePosition{x:0, y:100},
         className: "light".to_string(),
-        style: Some(Style{ backgroundColor: String::from("rgba(255, 0, 0, 0.2)"), width: 300, height: 300})
+        style: Some(Style{ backgroundColor: String::from("rgba(255, 0, 0, 0.2)"), width: 900, height: 600}),
+        draggable: Some(true),
+        selectable: Some(true)
     });
 
-    println!("{:?}", main_template.output_signals);
-    nodes.push(Node{
-        id: String::from("output"),
-        r#type: "output".to_string(),
-        data: NodeData{label:String::from("output")},
-        position: NodePosition{x:200, y:200},
-        className: "light".to_string(),
-        style: None
-    });
-
+    curr_x = 20;
+    curr_y = 100;
     for input_signal in &main_template.private_input_signals {
+        println!("{} {:?}", input_signal.name, &heap.variable_to_value_map);
         nodes.push(Node{
             id: input_signal.name.clone(),
             r#type: "input".to_string(),
-            data: NodeData{label:input_signal.name.clone()},
+            data: NodeData{label:format!("{} - value {}", input_signal.name.clone(), &heap.variable_to_value_map[&input_signal.name]),inputHandles: 1},
             position: NodePosition{x:curr_x, y:curr_y},
             className: "light".to_string(),
-            style: None
+            style: None,
+            draggable: Some(true),
+            selectable: Some(true)
         });
-        edges.push(Edge{
-            id: format!("e{}",curr_y),
-            source: input_signal.name.clone(),
-            target: "output".to_string(),
-        });
-        curr_y = curr_y + 50;
+        curr_x = curr_x + 150;
     }
 
+    curr_y = curr_y + 50;
+    curr_x = 20;
     for interm_signal in &main_template.intermediate_signals {
-        println!("Interm signal {:?}", interm_signal);
         nodes.push(Node{
             id: interm_signal.name.clone(),
-            r#type: "input".to_string(),
-            data: NodeData{label:interm_signal.name.clone()},
+            r#type: "default".to_string(),
+            data: NodeData{label:format!("{} value - {}", interm_signal.name.clone(), heap.variable_to_value_map[&interm_signal.name]), inputHandles: 1},
             position: NodePosition{x:curr_x, y:curr_y},
             className: "light".to_string(),
-            style: None
+            style: None,
+            draggable: Some(true),
+            selectable: Some(true)
         });
-        edges.push(Edge{
-            id: format!("e{}",curr_y),
-            source: interm_signal.name.clone(),
-            target: "output".to_string(),
-        });
-        curr_y = curr_y + 50;
+        curr_x = curr_x + 150;
+        for neighbour in heap.var_depending_on[&interm_signal.name].iter() {        
+            edges.push(Edge{
+                id: format!("e{}-{}", neighbour, interm_signal.name),
+                source: neighbour.clone(),
+                target: interm_signal.name.clone(),
+                targetHandle: None,
+            });
+        }
     }
 
+    curr_y = curr_y + 50;
+    curr_x = 20;
+    for (comp_name, sub_comp) in heap.variable_to_component_map.into_iter() {
+        nodes.push(Node{
+            id: comp_name.clone(),
+            r#type: "customNode".to_string(),
+            data: NodeData{label:comp_name.clone(), inputHandles: 2},
+            position: NodePosition{x:curr_x, y:curr_y},
+            className: "light".to_string(),
+            style: Some(Style{ backgroundColor: String::from("rgba(255, 0, 0, 0.2)"), width: 100, height:120}),
+            draggable: Some(true),
+            selectable: Some(true)
+        });
+        curr_x = curr_x + 200;
+        for (tmp_item, values) in heap.var_depending_on.iter() {
+            if !tmp_item.starts_with(&comp_name) {
+                continue;
+            }
+            for v in values.iter(){
+                edges.push(Edge{
+                    id: format!("e{}-{}", v, comp_name),
+                    source: v.clone(),
+                    target: comp_name.clone(),
+                    targetHandle: Some(tmp_item.clone())
+                });
+            }
+        }
+    }
 
-    // println!("Components {:?}", &main_template.components);
-    // for component in &main_template.components {
-    //     curr_x = curr_x + 40;
-    //     // curr_y = curr_y + 20; 
-    //     // println!("Component category {:?}", component.template_to_use.clone());
-    //     // println!("Component key {:?}", component.name.clone());
-
-
-    //     // println!("{:?}", template_map);
-    //     match template_map.get(&component.template_to_use) {
-    //         Some(templ) => {
-    //             components.push(OutputFormat{
-    //                 category: templ.name.clone(),
-    //                 key: component.name.clone(),
-    //                 loc: format!("{} {}", curr_x, curr_y),
-    //                 isGroup: false,
-    //                 group: main_template.name.clone()
-    //             });
-
-    //             let mut signals = "".to_string();
-    //             let mut coordinate = 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
-    //             for i_signal in &templ.private_input_signals {
-    //                 let signal_template = format!(r#"$(go.Shape, "Rectangle", portStyle(true),  
-    //                 {{ portId: "{}", alignment: new go.Spot(0, {}) }})"#, i_signal.name, coordinate);
-    //                 signals = format!("{},{}", signal_template, signals);
-    //                 coordinate += 1.0 / (templ.private_input_signals.len() as f32 + 1.0 );
-    //             }
-    //             template_data = format!(r#"
-    //                 var {}Template =
-    //                 $(go.Node, "Spot", nodeStyle(),
-    //                   $(go.Shape, "Rectangle", templateStyle(),
-    //                     {{ fill: blue }}),
-    //                   {}
-    //                   $(go.Shape, "Rectangle", portStyle(false),
-    //                     {{ portId: "out", alignment: new go.Spot(1, 0.5) }}),
-    //                     $(go.TextBlock,
-    //                       {{ alignment: go.Spot.Center, font: "12pt Sans-Serif" }},
-    //                       new go.Binding("text", "key"))
-    //                 );"#, templ.name.clone(), signals).to_string();
-    //             pallete_data = format!(r#"myDiagram.nodeTemplateMap.add("{}", {}Template);"#, templ.name.clone(), templ.name.clone()).to_string();
-    //             model_data = format!(r#"{{ category: "{}" }},"#, templ.name.clone()).to_string();
-    //         },
-    //         None => {
-
-    //         }
-    //     }
-    // }
+    curr_y = curr_y + 200;
+    curr_x = 20;
+    for signal in &main_template.output_signals {
+        nodes.push(Node{
+            id: signal.name.clone(),
+            r#type: "output".to_string(),
+            data: NodeData{label:format!("{} value - {}", signal.name.clone(), heap.variable_to_value_map[&signal.name]), inputHandles: 1},
+            position: NodePosition{x:curr_x, y:curr_y},
+            className: "light".to_string(),
+            style: None,
+            draggable: Some(true),
+            selectable: Some(true)
+        });
+        curr_x = curr_x + 200;
+        for neighbour in heap.var_depending_on[&signal.name].iter() {
+            println!("- neighbour {}", neighbour);
         
-    println!("{:?}", edges);
+            edges.push(Edge{
+                id: format!("e{}-{}", neighbour, signal.name),
+                source: neighbour.clone(),
+                target: signal.name.clone(),
+                targetHandle: None
+            });
+        }
+    }
     println!("{:?}", nodes);
+    println!("{:?}", edges);
     Ok((nodes, edges))
 }
 
@@ -1135,7 +907,7 @@ fn evaluate(bool_exp: BoolExpression, variable_to_value_map:&mut HashMap<String,
     false
 }
 
-fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut HashMap<String, u32>) -> (String, String) {
+fn generate_string_from_variable(var: &ExecutionVariable, variable_to_value_map: &mut HashMap<String, u32>) -> (String, String) {
     let mut result = format!("{}", var.id).to_string();
     for x in &var.indexing {
         match variable_to_value_map.get(x) {
@@ -1163,7 +935,7 @@ fn generate_string_from_variable(var: &Variable, variable_to_value_map: &mut Has
 }
 
 fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMap<String, Template>) {
-    println!("~ {:?}", single_command);
+    // println!("~ {:?}", single_command);
     match single_command {
         SingleCommand::ForLoop(for_loop) => {
             // println!("For loop {}",for_loop.index);
@@ -1193,18 +965,19 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                             // println!("Executing evaluated_target {:?}", evaluated_target);
                             // println!("Executing evaluated_value {:?}", evaluated_value);
                             match evaluated_target {
-                                EvaluationResult::Identifier(iden) => {
+                                (EvaluationResult::Identifier(iden), vec) => {
                                     match evaluated_value {
-                                        EvaluationResult::ComponentInstance(component_instance) => {
+                                        (EvaluationResult::ComponentInstance(component_instance), vec) => {
                                             let tmp_comp = Component{
                                                 name: iden.clone(),
                                                 template_to_use: component_instance.name.clone(),
                                                 size_per_dimension: vec![],
                                                 arguments: component_instance.parameter_list.clone(),
                                             };
-                                            heap.variable_to_component_map.insert(iden, tmp_comp);
+                                            heap.variable_to_component_map.insert(iden.clone(), tmp_comp);
+                                            heap.var_depending_on.insert(iden, Box::new(vec));
                                         },
-                                        EvaluationResult::Value(num) => {
+                                        (EvaluationResult::Value(num), vec) => {
                                             heap.variable_to_value_map.insert(iden, num);
                                         },
                                         _ => {}
@@ -1218,12 +991,14 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                 
                 }, 
                 Stmt::Constraint(constraint) => {
+                    let const_trgt = constraint.target.serialize(&mut heap.variable_to_value_map);
                     let evaluated_target = expression_parser::evaluate(&Expr::ComplexVariable(constraint.target.clone()), &mut heap.variable_to_value_map);
-                    let evaluated_value = expression_parser::evaluate(&constraint.value, &mut heap.variable_to_value_map);
+                    let (evaluated_value, vec2) = expression_parser::evaluate(&constraint.value, &mut heap.variable_to_value_map);
                     // println!("Executing evaluated_target {:?}", evaluated_target);
                     // println!("Executing evaluated_value {:?}", evaluated_value);
+                    heap.var_depending_on.insert(const_trgt, Box::new(vec2));
                     match evaluated_target {
-                        EvaluationResult::Identifier(iden) => {
+                        (EvaluationResult::Identifier(iden), vec1) => {
                             match evaluated_value {
                                 EvaluationResult::Value(num) => {
                                     heap.variable_to_value_map.insert(iden, num);
@@ -1260,10 +1035,12 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                     match &decl_statement.expression {
                         Stmt::RegularExpr(expr) => {
                             let val = expression_parser::evaluate(&expr, &mut heap.variable_to_value_map);
-                            println!("Valuelue {:?}", val);
+                            // println!("Valuelue {:?}", val);
                             match val {
-                                EvaluationResult::Value(number) => {
+                                (EvaluationResult::Value(number), vec) => {
                                     heap.variable_to_value_map.insert(signal.clone(), number.clone());
+                                    heap.var_depending_on.insert(signal.clone(), Box::new(vec));
+                                    // println!("heap new {:?}", &heap.var_depending_on);
                                 },
                                 _ => {}
                             }
@@ -1296,6 +1073,7 @@ fn execute(single_command:&SingleCommand, heap: &mut Heap, template_map: &HashMa
                         variable_to_value_map: HashMap::new(),
                         variable_to_component_map: HashMap::new(),
                         variable_to_heap_map : HashMap::new(),
+                        var_depending_on: HashMap::new(),
                     });
                 }
             }
@@ -1327,6 +1105,7 @@ struct Heap{
     variable_to_value_map: HashMap<String, u32>,
     variable_to_component_map: HashMap<String, Component>,
     variable_to_heap_map: HashMap<String, Heap>,
+    var_depending_on: HashMap<String, Box<Vec<String>>>
 }
 
 fn extract_original_content_from_span(path_to_content_map: &HashMap<String, String>, span: (usize, usize), file_path: &String) -> expression_parser::Stmt {
@@ -1337,7 +1116,7 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
         }
         None => {}
     }
-    println!("Try to parse {}", result);
+    // println!("Try to parse {}", result);
 
     expression_parser::parse_statement(result)
  }
@@ -1423,6 +1202,7 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
         variable_to_value_map: HashMap::new(),
         variable_to_component_map: HashMap::new(),
         variable_to_heap_map: HashMap::new(),
+        var_depending_on: HashMap::new()
     };
     let mut running = true;
 
@@ -1431,6 +1211,7 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
         ("in2".to_string(), 1),
         ("in3".to_string(), 7),
         ("in4".to_string(), 1),
+        ("mult".to_string(), 21)
     ]);
     // let mut test_variable_to_value_map = HashMap::from([
     //     ("board[1][0]".to_string(), 0 as u32),
@@ -1467,16 +1248,16 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
                 }
                 println!("{:?}", heap.variable_to_value_map);
                 // for signal in &template.private_input_signals {
-                //     actual_input_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &variable_to_value_map));
+                //     actual_input_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &heap.variable_to_value_map));
                 // }
                 // for signal in &template.output_signals {
                 //     actual_output_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &variable_to_value_map));
                 // }
                 // for signal in &template.intermediate_signals {
-                //     actual_intermediate_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &variable_to_value_map));
+                //     actual_intermediate_signal_vector.append(&mut get_actual_value_for_signals_components(&signal.size_per_dimension, &signal.name, &heap.variable_to_value_map));
                 // }
                 // for component in &template.components {
-                //     actual_component_vector.append(&mut get_actual_value_for_signals_components(&component.size_per_dimension, &component.name, &variable_to_value_map));
+                //     actual_component_vector.append(&mut get_actual_value_for_signals_components(&component.size_per_dimension, &component.name, &heap.variable_to_value_map));
                 // }
                 
                 // declarations done
@@ -1484,6 +1265,8 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
                 for command in &template.instructions {
                     execute(&command, &mut heap, &template_map);
                 }
+                println!("HEAP DUMP =========");
+                println!("{:?}", heap.var_depending_on);
                 println!("{:?}", heap.variable_to_value_map);
             },
             None => {
@@ -1498,28 +1281,53 @@ fn extract_original_content_from_span(path_to_content_map: &HashMap<String, Stri
     println!("{:?}", actual_component_vector);
 
     //Drawing
-    serialize_for_visual(&template_map, main_component.clone())
+    println!("{:?}", heap);
+    serialize_for_visual(&template_map, main_component.clone(), heap)
  }
+
+ #[derive(Deserialize, Serialize)]
+ struct GraphData {
+     data: String,
+ }
+
+ async fn fetch_graph_data(component: String) -> Result<impl warp::Reply, warp::Rejection> {
+    let (mut nodes, mut edges) = (vec![Node{id: "1".to_string(), r#type:"default".to_string(), data:NodeData { label: "()".to_string(), inputHandles: 0 }, position:NodePosition{x:100, y:100}, className:"abc".to_string(), style:None, draggable:None, selectable:None}], vec![]);
+    if component.contains("main") {
+        (nodes, edges) = extract_values().unwrap();
+    }
+    let graph_data = serde_json::json!({ "initialNodes": nodes, "initialEdges": edges });
+    
+    Ok(Response::builder().header("Content-Type", "application/json").body(serde_json::to_string(&graph_data).unwrap()))
+}
+
 
  #[tokio::main]
  async fn main() {
-    let (nodes, edges) = extract_values().unwrap();
     let cors = warp::cors()
     .allow_any_origin()
     .allow_headers(vec!["*"])
     .allow_methods(vec!["GET", "POST", "DELETE", "PUT", "OPTIONS"]);
 
-    let route = warp::path("graph-data")
+    let route1 = warp::path!("graph-data" / String)
     .and(warp::get())
-    .map(move || {
-        let graph_data = serde_json::json!({ "initialNodes": nodes, "initialEdges": edges });
-        println!("Serving new request");
-        Response::builder().header("Content-Type", "application/json").body(serde_json::to_string(&graph_data).unwrap())
-    }).with(cors);
+    .and_then(fetch_graph_data).with(cors.clone());
 
     println!("serving on 0.0.0.0:3030");
 
-    warp::serve(route).run(([0, 0, 0, 0], 3030)).await;
+    let file_path = "/Users/veljko/Documents/GitHub/shortcircuit/src/lib/parser/sample_circuits/multiplier4.circom";
+
+    // Create a route that serves the file
+    let route2 = warp::path("get_file").and(warp::get()).map(move || {
+        match fs::read(file_path) {
+            Ok(content) => {
+                return Response::builder().header("Content-Type", "application/text").body(content).unwrap();
+            }
+            Err(_) => return Response::builder().status(404).body(Vec::new()).unwrap(),
+        };
+    }).with(cors).with(warp::log("warp_server"));
+
+    let routes = route1.or(route2);
+    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 
 }
 

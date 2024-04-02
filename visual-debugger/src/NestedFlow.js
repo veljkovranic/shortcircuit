@@ -8,6 +8,12 @@ import ReactFlow, {
   Controls,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import CustomNode from './components/CustomNode';
+
+const nodeTypes = {
+  customNode: CustomNode,
+};
+
 
 const initialNodes = [
   {
@@ -90,9 +96,11 @@ const initialEdges = [
   { id: 'e4b1-4b2', source: '4b1', target: '4b2' },
 ];
 
-const fetchGraphData = async () => {
+const fetchGraphData = async (component) => {
   try {
-    const response = await fetch('http://0.0.0.0:3030/graph-data');
+    const encodedComponent = encodeURIComponent(component);
+    const url = `http://0.0.0.0:3030/graph-data/${encodedComponent}`;
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -102,14 +110,39 @@ const fetchGraphData = async () => {
   }
 };
 
+
 const NestedFlow = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  const update_nodes = async (component) => {
+    const graphData = await fetchGraphData(component);
+        console.log(graphData);
+        for (let node in graphData.initialNodes) {
+          if (node.type == 'customNode') {
+            console.log("CUSTOM NODE FIDDLE");
+            node.data = { label:node.data.label, onChildAction: fetchGraphData }
+          }
+        }
+  
+        if (graphData) {
+          setNodes(graphData.initialNodes);
+          setEdges(graphData.initialEdges);
+        }
+  };
+
   useEffect(() => {
     const loadGraphData = async () => {
-      const graphData = await fetchGraphData();
-      console.log(graphData);
+      const graphData = await fetchGraphData('main');
+      for (let node in graphData.initialNodes) {
+        if (graphData.initialNodes[node].type == "customNode") {
+          console.log("CUSTOM NODE FIDDLE");
+          graphData.initialNodes[node].data = { label:graphData.initialNodes[node].data.label, onChildAction: update_nodes }
+          console.log(graphData.initialNodes[node]);
+
+        }
+      }
+
       if (graphData) {
         setNodes(graphData.initialNodes);
         setEdges(graphData.initialEdges);
@@ -125,6 +158,7 @@ const NestedFlow = () => {
 
   return (
     <ReactFlow
+      nodeTypes={nodeTypes} 
       nodes={nodes}
       edges={edges}
       onNodesChange={onNodesChange}
@@ -133,7 +167,7 @@ const NestedFlow = () => {
       className="react-flow-subflows-example"
       fitView
     >
-      <MiniMap />
+      {/* <MiniMap /> */}
       <Controls />
       <Background />
     </ReactFlow>

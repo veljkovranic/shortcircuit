@@ -121,6 +121,24 @@ pub enum Expr {
     ComponentInstance(ComponentInstance)
 }
 
+// impl Expr {
+//     fn extract_dependent_values(&self) -> Vec<String> {
+//         let mut dep_vars : Vec<String> = vec![];
+//         match self {
+//             Expr::Number(n) => {
+//                 dep_vars.push(n.to_string());
+//             },
+//             Expr::ComplexVariable(variable) => {
+//                 dep_vars.push(variable.to_string());
+//                 println!("The Quit variant has no data to act on.");
+//             },
+//             _ => {
+
+//             },
+//         }
+//         dep_vars
+//     }
+// }
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct Constraint {
     pub target: Variable,
@@ -170,7 +188,94 @@ pub enum EvaluationResult {
     Identifier(String),
     ComponentInstance(EvaluatedComponentInstance)
 }
+pub trait Serializable {
+    fn serialize(&self, heap: &mut HashMap<String, u32>) -> String;
+}
 
+impl Serializable for Variable {
+    fn serialize(&self, heap: &mut HashMap<String, u32>) -> String {
+        let mut res = "".to_string();
+        res = format!("{}{}", res, self.id);
+        let var_name = self;
+        if var_name.indexing.len() > 0 {
+            for index in 0..var_name.indexing.len() {
+                let index_evaluated = evaluate(&var_name.indexing[index], heap);
+                match index_evaluated {
+                    (EvaluationResult::Value(num), vec) => {
+                        res = format!("{}[{}]", res, num.clone());
+                    },
+                    (EvaluationResult::Identifier(num), vec) => {
+                        match heap.get(&num) {
+                            Some(value) => {
+                                res = format!("{}[{}]", res, value.clone());
+                            },
+                            None => {
+                                res = format!("{}[{}]", res, num.clone());
+                            }
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            match &var_name.sub_variable {
+                Some(var) => {
+                    res = format!("{}.{}", res, var.id);
+                    if var.indexing.len() > 0 {
+                        for index in 0..var.indexing.len() {
+                            let index_evaluated = evaluate(&var.indexing[index], heap);
+                            match index_evaluated {
+                                (EvaluationResult::Value(num), vec) => {
+                                    res = format!("{}[{}]", res, num.clone());
+                                },
+                                (EvaluationResult::Identifier(num), vec) => {
+                                    match heap.get(&num) {
+                                        Some(value) => {
+                                            res = format!("{}[{}]", res, value.clone());
+                                        },
+                                        None => {
+                                            res = format!("{}[{}]", res, num.clone());
+                                        }
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                },
+                None => {}
+                }
+        } else {
+            match &var_name.sub_variable {
+                Some(var) => {
+                    res = format!("{}.{}", res, var.id);
+                    if var.indexing.len() > 0 {
+                        for index in 0..var.indexing.len() {
+                            let index_evaluated = evaluate(&var.indexing[index], heap);
+                            match index_evaluated {
+                                (EvaluationResult::Value(num), vec) => {
+                                    res = format!("{}[{}]", res, num.clone());
+                                },
+                                (EvaluationResult::Identifier(num), vec) => {
+                                    match heap.get(&num) {
+                                        Some(value) => {
+                                            res = format!("{}[{}]", res, value.clone());
+                                        },
+                                        None => {
+                                            res = format!("{}[{}]", res, num.clone());
+                                        }
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                },
+                None => {}
+                }
+        }
+        res
+    }
+}
 pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, u32>) -> String {
     let mut res = "".to_string();
     res = format!("{}{}", res, var_name.id);
@@ -178,10 +283,10 @@ pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, 
         for index in 0..var_name.indexing.len() {
             let index_evaluated = evaluate(&var_name.indexing[index], heap);
             match index_evaluated {
-                EvaluationResult::Value(num) => {
+                (EvaluationResult::Value(num), vec) => {
                     res = format!("{}[{}]", res, num.clone());
                 },
-                EvaluationResult::Identifier(num) => {
+                (EvaluationResult::Identifier(num), vec) => {
                     match heap.get(&num) {
                         Some(value) => {
                             res = format!("{}[{}]", res, value.clone());
@@ -201,10 +306,10 @@ pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, 
                     for index in 0..var.indexing.len() {
                         let index_evaluated = evaluate(&var.indexing[index], heap);
                         match index_evaluated {
-                            EvaluationResult::Value(num) => {
+                            (EvaluationResult::Value(num), vec) => {
                                 res = format!("{}[{}]", res, num.clone());
                             },
-                            EvaluationResult::Identifier(num) => {
+                            (EvaluationResult::Identifier(num), vec) => {
                                 match heap.get(&num) {
                                     Some(value) => {
                                         res = format!("{}[{}]", res, value.clone());
@@ -225,20 +330,20 @@ pub fn get_string_from_variable(var_name: &Variable, heap: &mut HashMap<String, 
     res
 }
 
-pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> EvaluationResult {
+pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> (EvaluationResult, Vec<String>) {
     match exp {
         Expr::Number(value) => {
-            return EvaluationResult::Value(value.clone());
+            return (EvaluationResult::Value(value.clone()), vec![]);
         },
         Expr::ComplexVariable(var_name) => {
             let res = get_string_from_variable(&var_name, heap);
 
             match heap.get(&res) {
                 Some(value) => {
-                    return EvaluationResult::Value(value.clone());
+                    return (EvaluationResult::Value(value.clone()), vec![res]);
                 },
                 None => {
-                    return EvaluationResult::Identifier(res.clone());
+                    return (EvaluationResult::Identifier(res.clone()), vec![res]);
                 }
             }
         },
@@ -247,35 +352,36 @@ pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> EvaluationResult
             let mut params = vec![];
             for param in &component.parameter_list {
                 match evaluate(param, heap) {
-                    EvaluationResult::Value(number) => {
+                    (EvaluationResult::Value(number), vec) => {
                         params.push(number);
                     },
                     _ => {}
                 }
             }
-            return EvaluationResult::ComponentInstance(EvaluatedComponentInstance{
+            return (EvaluationResult::ComponentInstance(EvaluatedComponentInstance{
                 name: res,
                 parameter_list: params
-            });
+            }), vec![]);
         },
         Expr::BinaryOperation(bin_op) => {
             // println!("Binary operation {:?}", *bin_op.left);
             match evaluate(&*bin_op.left, heap) {
-                EvaluationResult::Value(number_l) => {
+                (EvaluationResult::Value(number_l), mut vec_l) => {
                     match evaluate(&*bin_op.right, heap) {
-                        EvaluationResult::Value(number_r) => {
+                        (EvaluationResult::Value(number_r), mut vec_r) => {
+                            vec_l.append(vec_r.as_mut());
                             match bin_op.op {
                                 BinOp::Multiply => {
-                                    return EvaluationResult::Value(number_l*number_r);
+                                    return (EvaluationResult::Value(number_l*number_r), vec_l);
                                 },
                                 BinOp::Add => {
-                                    return EvaluationResult::Value(number_l+number_r);
+                                    return (EvaluationResult::Value(number_l+number_r), vec_l);
                                 },
                                 BinOp::Subtract => {
-                                    return EvaluationResult::Value(number_l-number_r);
+                                    return (EvaluationResult::Value(number_l-number_r), vec_l);
                                 },
                                 BinOp::Divide => {
-                                    return EvaluationResult::Value(number_l / number_r);
+                                    return (EvaluationResult::Value(number_l / number_r), vec_l);
                                 },
                                 _ => {}
                             }
@@ -290,7 +396,7 @@ pub fn evaluate(exp: &Expr, heap: &mut HashMap<String, u32>) -> EvaluationResult
 
         }
     }
-    EvaluationResult::Empty
+    (EvaluationResult::Empty, vec![])
 }
 
 pub fn parse_operation(pairs: pest::iterators::Pair<Rule>) -> Operator {
